@@ -2,7 +2,8 @@
 
 import { use } from "react";
 import Link from "next/link";
-import { ArrowLeft, Send, RefreshCw, Copy, Eye, CheckCircle, XCircle } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, Send, RefreshCw, Copy, Eye, CheckCircle, XCircle, Pencil } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,6 +18,7 @@ const STATUS_STYLES: Record<string, string> = {
 export default function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { db, save } = useDb();
+  const router = useRouter();
 
   const quote = db.quotes.find((q) => q.id === id);
   const project = quote ? db.projects.find((p) => p.id === quote.projectId) : null;
@@ -78,14 +80,15 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <Eye className="h-4 w-4" /> View Quote
+            <Button
+              size="sm"
+              className="bg-[#0f6b4f] hover:bg-[#0d5c43] text-white gap-1.5"
+              onClick={() => router.push(`/quotes/${id}/edit`)}
+            >
+              <Pencil className="h-4 w-4" /> Edit Quote
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5">
-              <Send className="h-4 w-4" /> Resend
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5">
-              <RefreshCw className="h-4 w-4" /> New Revision
+              <Send className="h-4 w-4" /> Send
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5">
               <Copy className="h-4 w-4" /> Duplicate

@@ -1,12 +1,14 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FolderOpen, MapPin, Calendar, Plus, MoreHorizontal } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
-import { formatDate, formatCurrency } from "@/lib/utils";
+import { formatDate, formatCurrency, generateId } from "@/lib/utils";
+import { generateQuoteNumber } from "@/lib/storage";
+import { Quote } from "@/lib/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -18,8 +20,34 @@ const STATUS_STYLES: Record<string, string> = {
 
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { db } = useDb();
+  const { db, save } = useDb();
+  const router = useRouter();
+  const [creatingQuote, setCreatingQuote] = useState(false);
 
+  async function createQuote() {
+    if (!project) return;
+    setCreatingQuote(true);
+    const counter = (db.meta?.quoteCounter ?? 0) + 1;
+    const newQuote: Quote = {
+      id: generateId(),
+      projectId: project.id,
+      projectName: project.name,
+      number: generateQuoteNumber(counter),
+      jobName: project.name,
+      status: "unsent",
+      taxRate: 7,
+      routes: [],
+      createdAt: new Date().toISOString(),
+    };
+    await save({
+      ...db,
+      quotes: [newQuote, ...db.quotes],
+      meta: { ...db.meta, quoteCounter: counter },
+    });
+    router.push(`/quotes/${newQuote.id}/edit`);
+  }
+
+  // project is used in createQuote — must be declared before hooks
   const project = db.projects.find((p) => p.id === id);
   const quotes = db.quotes.filter((q) => q.projectId === id);
 
@@ -91,7 +119,12 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         <TabsContent value="quotes">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-base font-semibold text-gray-900">Quotes</h2>
-            <Button size="sm" className="bg-[#0f6b4f] hover:bg-[#0d5c43] text-white gap-1">
+            <Button
+              size="sm"
+              className="bg-[#0f6b4f] hover:bg-[#0d5c43] text-white gap-1"
+              onClick={createQuote}
+              disabled={creatingQuote}
+            >
               <Plus className="h-4 w-4" /> New Quote
             </Button>
           </div>
