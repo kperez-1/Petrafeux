@@ -3,9 +3,29 @@
 import { use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Send, RefreshCw, Copy, Eye, CheckCircle, XCircle, Pencil } from "lucide-react";
+import {
+  ArrowLeft,
+  Send,
+  Copy,
+  CheckCircle,
+  XCircle,
+  Pencil,
+  Clock,
+} from "lucide-react";
 import { useDb } from "@/components/DbProvider";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { getBrokerFeePercent } from "@/lib/db-defaults";
+import {
+  calcQuote,
+  haulBrokerIncomePerTon,
+  netHaulBuyRate,
+  allInUnitRate,
+} from "@/lib/quote-calc";
+import { duplicateQuote, sendQuote, appendQuoteHistory } from "@/lib/quote-actions";
+import { getRouteMaterials } from "@/lib/route-materials";
+import { ActivitiesPanel } from "@/components/activities/ActivitiesPanel";
+import { getActivitiesForQuote } from "@/lib/activities";
+import { Quote, QuoteHistoryEvent, normalizeMaterialUnit, unitRateLabel } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -13,6 +33,14 @@ const STATUS_STYLES: Record<string, string> = {
   unsent: "bg-gray-100 text-gray-600 border-gray-200",
   approved: "bg-green-100 text-green-800 border-green-200",
   rejected: "bg-red-100 text-red-700 border-red-200",
+};
+
+const HISTORY_LABELS: Record<QuoteHistoryEvent["type"], string> = {
+  created: "Quote created",
+  sent: "Quote sent",
+  approved: "Quote approved",
+  rejected: "Quote rejected",
+  duplicated_from: "Duplicated from",
 };
 
 export default function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -34,36 +62,59 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
     );
   }
 
-  // Summary calculations
-  const routeSums = quote.routes.map((r) => ({
-    subtotal: r.haulCost + r.materialCost,
-    taxable: r.taxable,
-  }));
-  const subtotal = routeSums.reduce((s, r) => s + r.subtotal, 0);
-  const taxableAmt = routeSums.filter(r => r.taxable).reduce((s, r) => s + r.subtotal, 0);
-  const tax = taxableAmt * (quote.taxRate / 100);
-  const total = subtotal + tax;
+  const currentQuote: Quote = quote;
 
-  // Gross profit (example: haul GP = haul cost - (haul cost * 0.65), material GP = sell - cost)
-  const haulingGP = quote.routes.reduce((s, r) => s + (r.haulCost - r.haulRate * r.haulQty), 0);
-  const materialGP = quote.routes.reduce((s, r) => s + (r.materialCost - r.materialRate * r.materialQty), 0);
+  const brokerFeePercent = getBrokerFeePercent(db.meta);
+  const quoteCalc = calcQuote(currentQuote, db.meta);
+  const { subtotal, tax, total } = quoteCalc;
+  const { haulBrokerIncome, haulingGP, materialGP } = quoteCalc;
 
-  async function setStatus(status: "approved" | "rejected" | "sent") {
-    await save({ ...db, quotes: db.quotes.map((q) => q.id === id ? { ...q, status } : q) });
+  const quoteActivities = getActivitiesForQuote(db, currentQuote);
+
+  const quoteHistory: QuoteHistoryEvent[] =
+    currentQuote.history?.length
+      ? [...currentQuote.history].sort(
+          (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()
+        )
+      : [{ id: "created", type: "created", at: currentQuote.createdAt }];
+
+  async function updateQuote(next: Quote) {
+    await save({
+      ...db,
+      quotes: db.quotes.map((q) => (q.id === id ? next : q)),
+    });
+  }
+
+  async function handleSend() {
+    const nextDb = sendQuote(db, id);
+    if (nextDb) await save(nextDb);
+  }
+
+  async function handleDuplicate() {
+    const result = duplicateQuote(db, id);
+    if (result) {
+      await save(result.db);
+      router.push(`/quotes/${result.newQuoteId}/edit`);
+    }
+  }
+
+  async function setStatus(status: "approved" | "rejected") {
+    const updated = appendQuoteHistory(
+      { ...currentQuote, status },
+      status
+    );
+    await updateQuote(updated);
   }
 
   return (
     <div className="flex h-full">
-      {/* Main content */}
       <div className="flex-1 overflow-y-auto p-8">
-        {/* Breadcrumb */}
         <div className="mb-4 flex items-center gap-2 text-sm text-gray-500">
           <Link href="/quotes" className="hover:text-gray-900">Quotes</Link>
           <span>›</span>
           <span className="text-gray-900">{project?.name || quote.jobName}</span>
         </div>
 
-        {/* Header */}
         <div className="mb-6 flex items-center gap-4">
           <button onClick={() => history.back()} className="text-gray-400 hover:text-gray-600">
             <ArrowLeft className="h-5 w-5" />
@@ -71,12 +122,14 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
           <div className="flex-1">
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-semibold text-gray-900">{project?.name || quote.jobName}</h1>
-              <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${STATUS_STYLES[quote.status]}`}>
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize ${STATUS_STYLES[quote.status]}`}
+              >
                 {quote.status}
               </span>
             </div>
             <p className="mt-1 text-sm text-gray-500">
-              {quote.number} · {contractor ? `${contractor.firstName} ${contractor.lastName}` : "No contractor"} · v1
+              {quote.number} · {contractor ? `${contractor.firstName} ${contractor.lastName}` : "No contractor"}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -87,16 +140,21 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
             >
               <Pencil className="h-4 w-4" /> Edit Quote
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={handleSend}
+              disabled={currentQuote.status === "sent"}
+            >
               <Send className="h-4 w-4" /> Send
             </Button>
-            <Button variant="outline" size="sm" className="gap-1.5">
+            <Button variant="outline" size="sm" className="gap-1.5" onClick={handleDuplicate}>
               <Copy className="h-4 w-4" /> Duplicate
             </Button>
           </div>
         </div>
 
-        {/* Section 1: Contractor */}
         <div className="mb-6 rounded-xl border border-gray-200 bg-white p-6">
           <div className="mb-4 flex items-center gap-3">
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0f6b4f] text-sm font-semibold text-white">
@@ -106,21 +164,30 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
           </div>
           {contractor ? (
             <div className="grid grid-cols-2 gap-4 text-sm">
-              <div><p className="text-xs text-gray-400">Company</p><p className="text-gray-800">{contractor.company}</p></div>
-              <div />
-              <div><p className="text-xs text-gray-400">First Name</p><p className="text-gray-800">{contractor.firstName}</p></div>
-              <div><p className="text-xs text-gray-400">Last Name</p><p className="text-gray-800">{contractor.lastName}</p></div>
-              <div><p className="text-xs text-gray-400">Email</p><p className="text-gray-800">{contractor.email}</p></div>
-              <div><p className="text-xs text-gray-400">Company Name</p><p className="text-gray-800">{contractor.company}</p></div>
-              <div><p className="text-xs text-gray-400">Phone</p><p className="text-gray-800">{contractor.phone}</p></div>
-              <div><p className="text-xs text-gray-400">Address</p><p className="text-gray-800">{contractor.address || "—"}</p></div>
+              <div>
+                <p className="text-xs text-gray-400">Name</p>
+                <p className="text-gray-800">
+                  {contractor.firstName} {contractor.lastName}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Company</p>
+                <p className="text-gray-800">{contractor.company || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Email</p>
+                <p className="text-gray-800">{contractor.email || "—"}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400">Phone</p>
+                <p className="text-gray-800">{contractor.phone || "—"}</p>
+              </div>
             </div>
           ) : (
             <p className="text-sm text-gray-400">No contractor assigned.</p>
           )}
         </div>
 
-        {/* Section 2: Basic Info */}
         <div className="mb-6 rounded-xl border border-gray-200 bg-white p-6">
           <div className="mb-4 flex items-center gap-3">
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0f6b4f] text-sm font-semibold text-white">
@@ -129,14 +196,25 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
             <h2 className="text-base font-semibold text-gray-900">Basic Info</h2>
           </div>
           <div className="grid grid-cols-2 gap-4 text-sm">
-            <div><p className="text-xs text-gray-400">Project</p><p className="text-gray-800">{project?.name || "—"}</p></div>
-            <div><p className="text-xs text-gray-400">Job Name</p><p className="text-gray-800">{quote.jobName}</p></div>
-            <div><p className="text-xs text-gray-400">Job Location</p><p className="text-gray-800">{project?.address || "—"}</p></div>
-            <div><p className="text-xs text-gray-400">Tax Rate</p><p className="text-gray-800">{quote.taxRate}%</p></div>
+            <div>
+              <p className="text-xs text-gray-400">Project</p>
+              <p className="text-gray-800">{project?.name || "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Job Name</p>
+              <p className="text-gray-800">{quote.jobName}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Job Location</p>
+              <p className="text-gray-800">{project?.address || "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400">Tax Rate</p>
+              <p className="text-gray-800">{quote.taxRate}% (material only)</p>
+            </div>
           </div>
         </div>
 
-        {/* Section 3: Routes */}
         <div className="rounded-xl border border-gray-200 bg-white p-6">
           <div className="mb-4 flex items-center gap-3">
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#0f6b4f] text-sm font-semibold text-white">
@@ -147,76 +225,129 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
           {quote.routes.length === 0 && (
             <p className="text-sm text-gray-400">No routes on this quote.</p>
           )}
-          {quote.routes.map((route, i) => (
+          {quote.routes.map((route) => (
             <div key={route.id} className="mb-4 rounded-lg border border-gray-100 p-4">
               <div className="mb-3 flex items-center gap-3 text-sm">
-                <span className="text-gray-600 font-medium truncate max-w-[220px]">{route.pickupAddress}</span>
+                <span className="font-medium text-gray-600 truncate max-w-[220px]">
+                  {route.pickupAddress || "—"}
+                </span>
                 <span className="text-gray-400">→</span>
-                <span className="text-gray-600 font-medium truncate max-w-[220px]">{route.dropoffAddress}</span>
-              </div>
-              {/* Hauling row */}
-              <div className="mb-2 rounded-md bg-gray-50 px-3 py-2">
-                <span className="mr-2 rounded-sm bg-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-600">Hauling</span>
-                <span className="text-sm text-gray-700">hauling</span>
-                <span className="float-right text-sm text-gray-700">
-                  {formatCurrency(route.haulRate)} · {formatCurrency(route.haulCost)} · {route.haulQty} ton
+                <span className="font-medium text-gray-600 truncate max-w-[220px]">
+                  {route.dropoffAddress || "—"}
                 </span>
               </div>
-              {/* Material row */}
-              {route.materialName && (
-                <div className="rounded-md bg-gray-50 px-3 py-2">
-                  <span className="mr-2 rounded-sm bg-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-600">Material</span>
-                  <span className="text-sm font-medium text-gray-700">{route.materialType}</span>
-                  <span className="ml-1 text-sm text-gray-500">{route.materialName}</span>
-                  <span className="float-right text-sm text-gray-700">
-                    {formatCurrency(route.materialRate)} · {formatCurrency(route.materialCost)} · {route.materialQty} ton
-                  </span>
-                  <div className="mt-1 text-xs text-gray-400">
-                    {route.taxable ? "Taxable · Hauling & material linked" : "Non-taxable"}
+              <div className="mb-2 rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                <span className="mr-2 rounded-sm bg-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-600">
+                  Hauling
+                </span>
+                Buy {formatCurrency(route.haulCost)} (net{" "}
+                {formatCurrency(netHaulBuyRate(route.haulCost, brokerFeePercent))}/ton) · Broker{" "}
+                {formatCurrency(haulBrokerIncomePerTon(route.haulCost, brokerFeePercent))}/ton · Sell{" "}
+                {formatCurrency(route.haulRate)} · {route.haulQty} ton
+              </div>
+              {getRouteMaterials(route).map((line, mi) => {
+                const allIn = allInUnitRate(
+                  line.materialCost,
+                  line.materialUnit,
+                  route.haulRate,
+                  route.haulUnit
+                );
+                return (
+                  <div
+                    key={line.id}
+                    className={`rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-700 ${mi > 0 ? "mt-2" : ""}`}
+                  >
+                    <div>
+                      <span className="mr-2 rounded-sm bg-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-600">
+                        Material{getRouteMaterials(route).length > 1 ? ` #${mi + 1}` : ""}
+                      </span>
+                      {line.materialName || "—"} · Buy {formatCurrency(line.materialRate)} · Sell{" "}
+                      {formatCurrency(line.materialCost)} · {line.materialQty}{" "}
+                      {line.materialUnit ?? "TN"}
+                    </div>
+                    <div className="mt-1 text-xs font-medium text-[#0f6b4f]">
+                      {allIn.combined != null
+                        ? `All-in ${formatCurrency(allIn.combined)} ${unitRateLabel(allIn.unit)} (material + hauling)`
+                        : `All-in ${formatCurrency(allIn.materialSell)} ${unitRateLabel(allIn.unit)} + haul ${formatCurrency(allIn.haulSell)} ${unitRateLabel(allIn.haulUnit)}`}
+                    </div>
                   </div>
+                );
+              })}
+              {getRouteMaterials(route).length === 0 && (
+                <div className="rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-700">
+                  <span className="mr-2 rounded-sm bg-gray-200 px-1.5 py-0.5 text-xs font-medium text-gray-600">
+                    Hauling only
+                  </span>
+                  {formatCurrency(route.haulRate)} {unitRateLabel(normalizeMaterialUnit(route.haulUnit))}
+                </div>
+              )}
+              {getRouteMaterials(route).length > 0 && (
+                <div className="mt-1 text-xs text-gray-400">
+                  {route.taxable ? "Materials taxable" : "Materials non-taxable"}
                 </div>
               )}
             </div>
           ))}
         </div>
 
-        {/* History */}
+        <div className="mt-6">
+          <ActivitiesPanel
+            activities={quoteActivities}
+            createDefaults={{
+              projectId: quote.projectId,
+              contractorId: quote.contractorId,
+              company: contractor?.company,
+            }}
+          />
+        </div>
+
         <div className="mt-6 rounded-xl border border-gray-200 bg-white p-6">
           <h2 className="mb-3 text-base font-semibold text-gray-900">History</h2>
-          <div className="text-sm text-gray-500">
-            <div className="flex items-center gap-2">
-              <Send className="h-4 w-4 text-gray-400" />
-              <span>Quote created — {formatDate(quote.createdAt)}</span>
-            </div>
+          <div className="space-y-2 text-sm text-gray-500">
+            {quoteHistory.map((event) => (
+              <div key={event.id} className="flex items-start gap-2">
+                <Clock className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                <span>
+                  {HISTORY_LABELS[event.type]}
+                  {event.note ? ` — ${event.note}` : ""} · {formatDate(event.at)}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Summary panel */}
       <div className="w-[280px] shrink-0 border-l border-gray-200 bg-white p-6 overflow-y-auto">
         <h2 className="mb-4 text-base font-semibold text-gray-900">Summary</h2>
 
         <div className="space-y-2 text-sm">
-          {quote.routes.map((route, i) => {
-            const routeTotal = route.haulCost + route.materialCost;
-            return (
-              <div key={route.id} className="flex justify-between">
-                <span className="text-gray-500">Route #{i + 1}</span>
-                <span className="font-medium text-gray-900">{formatCurrency(routeTotal)}</span>
-              </div>
-            );
-          })}
+          {quote.routes.map((route, i) => (
+            <div key={route.id} className="flex justify-between">
+              <span className="text-gray-500">Route #{i + 1}</span>
+              <span className="font-medium text-gray-900">
+                {formatCurrency(quoteCalc.routes[i]?.routeSubtotal ?? 0)}
+              </span>
+            </div>
+          ))}
         </div>
 
         <div className="my-4 border-t border-gray-100" />
 
         <div className="space-y-1.5 text-sm">
           <div className="flex justify-between text-gray-500">
+            <span>Hauling</span>
+            <span>{formatCurrency(quoteCalc.haulSubtotal)}</span>
+          </div>
+          <div className="flex justify-between text-gray-500">
+            <span>Material</span>
+            <span>{formatCurrency(quoteCalc.materialSubtotal)}</span>
+          </div>
+          <div className="flex justify-between text-gray-500">
             <span>Subtotal</span>
             <span>{formatCurrency(subtotal)}</span>
           </div>
           <div className="flex justify-between text-gray-500">
-            <span>Tax ({quote.taxRate}%)</span>
+            <span>Tax on material ({quote.taxRate}%)</span>
             <span>{formatCurrency(tax)}</span>
           </div>
           <div className="flex justify-between font-semibold text-gray-900">
@@ -232,20 +363,25 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
             Gross Profit (Estimate, Internal)
           </p>
           <div className="flex justify-between text-gray-500">
+            <span>Broker income ({brokerFeePercent}% of haul buy)</span>
+            <span className="text-green-700">{formatCurrency(haulBrokerIncome)}</span>
+          </div>
+          <div className="flex justify-between text-gray-500">
             <span>Hauling GP</span>
-            <span className={haulingGP >= 0 ? "text-green-700" : "text-red-600"}>{formatCurrency(haulingGP)}</span>
+            <span className={haulingGP >= 0 ? "text-green-700" : "text-red-600"}>
+              {formatCurrency(haulingGP)}
+            </span>
           </div>
           <div className="flex justify-between text-gray-500">
             <span>Material GP</span>
-            <span className={materialGP >= 0 ? "text-green-700" : "text-red-600"}>{formatCurrency(materialGP)}</span>
+            <span className={materialGP >= 0 ? "text-green-700" : "text-red-600"}>
+              {formatCurrency(materialGP)}
+            </span>
           </div>
           <div className="flex justify-between font-semibold text-gray-900">
             <span>Total GP</span>
-            <span>{formatCurrency(haulingGP + materialGP)}</span>
+            <span>{formatCurrency(quoteCalc.totalGP)}</span>
           </div>
-          <p className="text-[11px] text-gray-400">
-            Brokerage Fee/Rate (5%–10%) is not considered for the GP/Margins calculations at this stage.
-          </p>
         </div>
 
         <div className="my-4 border-t border-gray-100" />

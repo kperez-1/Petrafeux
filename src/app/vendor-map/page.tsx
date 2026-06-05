@@ -1,36 +1,59 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { MapPin } from "lucide-react";
 import { VendorMap } from "@/components/VendorMap";
-import { Button } from "@/components/ui/button";
+import { useDb } from "@/components/DbProvider";
+import { PageHeader, PageActionCards, PageActionCard } from "@/components/layout";
 
-export default function VendorMapPage() {
+function VendorMapPageInner() {
+  const { db } = useDb();
+  const params = useSearchParams();
+  const projectId = params.get("projectId") ?? undefined;
+  const quoteId = params.get("quoteId") ?? undefined;
   const [open, setOpen] = useState(true);
 
+  let project = projectId ? db.projects.find((p) => p.id === projectId) : undefined;
+  if (!project && quoteId) {
+    const quote = db.quotes.find((q) => q.id === quoteId);
+    if (quote) project = db.projects.find((p) => p.id === quote.projectId);
+  }
+
+  if (open) {
+    return (
+      <VendorMap
+        onClose={() => setOpen(false)}
+        projectAddress={project?.address}
+        projectName={project?.name}
+      />
+    );
+  }
+
   return (
-    <div className="flex h-full items-center justify-center bg-gray-50">
-      {!open && (
-        <div className="text-center">
-          <div className="mb-4 flex justify-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gray-100">
-              <MapPin className="h-8 w-8 text-gray-400" />
-            </div>
-          </div>
-          <h2 className="mb-2 text-lg font-semibold text-gray-900">Vendor Map</h2>
-          <p className="mb-6 text-sm text-gray-500">
-            View all vendors on an interactive map and build quotes.
-          </p>
-          <Button
-            className="bg-[#0f6b4f] hover:bg-[#0d5c43] text-white"
-            onClick={() => setOpen(true)}
-          >
-            <MapPin className="mr-2 h-4 w-4" />
-            Open Vendor Map
-          </Button>
-        </div>
-      )}
-      {open && <VendorMap onClose={() => setOpen(false)} />}
+    <div className="p-8">
+      <PageHeader
+        icon={MapPin}
+        title="Vendor Map"
+        description="View quarries and disposal sites on a map and build quote routes"
+      />
+      <PageActionCards>
+        <PageActionCard
+          icon={MapPin}
+          title="Open map"
+          description="Explore vendors by location and add materials to quotes."
+          buttonLabel="Open vendor map"
+          onClick={() => setOpen(true)}
+        />
+      </PageActionCards>
     </div>
+  );
+}
+
+export default function VendorMapPage() {
+  return (
+    <Suspense fallback={null}>
+      <VendorMapPageInner />
+    </Suspense>
   );
 }

@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Petrafi — Trucking Sales & CRM
 
-## Getting Started
+Next.js app for projects, quotes (haul + material pricing), vendors, contractors, and haul rate zones.
 
-First, run the development server:
+## Documentation
+
+See [docs/PRD.md](docs/PRD.md) for the full product requirements, data model, and architecture with diagrams.
+
+## Local development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3002](http://localhost:3002).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Data is stored in **browser localStorage** by default (yellow banner in the app).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Pricing rules (summary)
 
-## Learn More
+- **Hauling**: non-taxable service; tax does not apply to haul sell.
+- **Material**: tax applies to material sell when route is marked *Material taxable*.
+- **Broker fee**: configurable % of **haul buy** (Settings) — platform income; net buy = buy − broker.
+- **Hauling GP**: sell − net buy per ton × qty.
+- **Auto haul rates**: on quote edit, *Calc haul rate* geocodes pickup/dropoff, finds mileage zone, fills buy from zone table and sell with margin % from Settings.
 
-To learn more about Next.js, take a look at the following resources:
+## Remote storage (optional)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Create D1: `npm run d1:create`
+2. Update `database_id` in `wrangler.jsonc`
+3. Migrate: `npm run d1:migrate` (or `d1:migrate:remote` for production)
+4. Set `NEXT_PUBLIC_CRM_REMOTE=true` in `.env.local` or `wrangler.jsonc` vars
+5. Run with API backing:
+   - **Next dev + file API**: `npm run dev` — `/api/db` persists to `.data/petrafi-db.json`
+   - **Cloudflare**: `npm run preview:cloudflare` or `npm run deploy`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Scripts
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Dev server on port 3002 |
+| `npm run build` | Production build |
+| `npm run deploy` | Build + deploy to Cloudflare |

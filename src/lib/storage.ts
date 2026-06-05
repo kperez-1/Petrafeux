@@ -1,16 +1,8 @@
 import { Db } from "./types";
+import { EMPTY_DB } from "./db-defaults";
+import { normalizeFullDb } from "./normalize-db";
 
 const STORAGE_KEY = "petrafi_db_v1";
-
-const EMPTY_DB: Db = {
-  projects: [],
-  quotes: [],
-  contractors: [],
-  vendors: [],
-  materials: [],
-  haulRates: [],
-  meta: { quoteCounter: 0 },
-};
 
 export function isRemote(): boolean {
   return process.env.NEXT_PUBLIC_CRM_REMOTE === "true";
@@ -23,7 +15,7 @@ export function loadLocal(): Db {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return EMPTY_DB;
-    return { ...EMPTY_DB, ...JSON.parse(raw) };
+    return normalizeFullDb(JSON.parse(raw));
   } catch {
     return EMPTY_DB;
   }

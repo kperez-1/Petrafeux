@@ -2,7 +2,10 @@
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { Db } from "@/lib/types";
+import { EMPTY_DB } from "@/lib/db-defaults";
 import { loadLocal, saveLocal, loadRemote, saveRemote, isRemote } from "@/lib/storage";
+import { fetchBundledHaulRates } from "@/lib/haul-rates-seed";
+import { hydrateLocalDbFromServer } from "@/lib/db-hydrate";
 
 interface DbContextValue {
   db: Db;
@@ -16,22 +19,30 @@ const DbContext = createContext<DbContextValue | null>(null);
 
 export function DbProvider({ children }: { children: React.ReactNode }) {
   const remote = isRemote();
-  const [db, setDb] = useState<Db>({
-    projects: [],
-    quotes: [],
-    contractors: [],
-    vendors: [],
-    materials: [],
-    haulRates: [],
-    meta: { quoteCounter: 0 },
-  });
+  const [db, setDb] = useState<Db>({ ...EMPTY_DB });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const data = remote ? await loadRemote() : loadLocal();
+        let data = remote ? await loadRemote() : loadLocal();
+        if (!remote) {
+          const hydrated = await hydrateLocalDbFromServer(data);
+          if (hydrated !== data) {
+            data = hydrated;
+            saveLocal(data);
+          }
+        }
+        if (!data.haulRates?.length) {
+          try {
+            const haulRates = await fetchBundledHaulRates();
+            data = { ...data, haulRates };
+            if (!remote) saveLocal(data);
+          } catch {
+            /* user can load from Settings */
+          }
+        }
         setDb(data);
       } catch (e) {
         setError(String(e));

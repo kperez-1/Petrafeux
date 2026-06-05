@@ -43,3 +43,6 @@ next-env.d.ts
 # cloudflare
 .open-next
 .wrangler
+
+# local API file storage (remote dev without D1)
+.data/

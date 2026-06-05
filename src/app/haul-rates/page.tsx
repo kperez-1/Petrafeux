@@ -1,98 +1,185 @@
 "use client";
 
 import { useState } from "react";
-import { Route, Plus } from "lucide-react";
+import { Route, Percent } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
-import { generateId, formatCurrency } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { HaulRate } from "@/lib/types";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  PageHeader,
+  PageToolbar,
+  CreateFormSheet,
+  FormSection,
+  FormField,
+} from "@/components/layout";
+import { impliedRatePerCy, impliedRatePerTon } from "@/lib/haul-pricing";
 
 export default function HaulRatesPage() {
   const { db, save } = useDb();
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ zoneName: "", minMiles: "", maxMiles: "", ratePerTon: "" });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editLoad, setEditLoad] = useState("");
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkPercent, setBulkPercent] = useState("10");
 
-  async function create() {
-    if (!form.zoneName.trim()) return;
-    const hr: HaulRate = {
-      id: generateId(),
-      zoneName: form.zoneName.trim(),
-      minMiles: parseFloat(form.minMiles) || 0,
-      maxMiles: parseFloat(form.maxMiles) || 0,
-      ratePerTon: parseFloat(form.ratePerTon) || 0,
-    };
-    await save({ ...db, haulRates: [...db.haulRates, hr].sort((a, b) => a.minMiles - b.minMiles) });
-    setForm({ zoneName: "", minMiles: "", maxMiles: "", ratePerTon: "" });
-    setOpen(false);
+  const sorted = [...db.haulRates].sort((a, b) => a.miles - b.miles);
+
+  async function saveRate(id: string, ratePerLoad: number) {
+    await save({
+      ...db,
+      haulRates: db.haulRates.map((h) =>
+        h.id === id ? { ...h, ratePerLoad } : h
+      ),
+    });
+    setEditingId(null);
+  }
+
+  function startEdit(hr: HaulRate) {
+    setEditingId(hr.id);
+    setEditLoad(String(hr.ratePerLoad));
+  }
+
+  async function applyBulkAdjust() {
+    const pct = parseFloat(bulkPercent);
+    if (!Number.isFinite(pct)) return;
+    const factor = 1 + pct / 100;
+    const updated = db.haulRates.map((h) => ({
+      ...h,
+      ratePerLoad: Math.round(h.ratePerLoad * factor * 100) / 100,
+    }));
+    await save({
+      ...db,
+      haulRates: updated,
+      meta: {
+        ...db.meta,
+        haulRateAdjustmentPercent: pct,
+      },
+    });
+    setBulkOpen(false);
   }
 
   return (
     <div className="p-8">
-      <div className="mb-6 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gray-100">
-            <Route className="h-6 w-6 text-gray-500" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-900">Haul Rates</h1>
-            <p className="text-sm text-gray-500">Rate table by distance zone</p>
-          </div>
-        </div>
-        <Button className="bg-[#0f6b4f] hover:bg-[#0d5c43] text-white gap-1" onClick={() => setOpen(true)}>
-          <Plus className="h-4 w-4" /> Add Rate
-        </Button>
-      </div>
+      <PageHeader
+        icon={Route}
+        title="Haul Rates"
+        description="Price per load by mile (1–150). TN = load ÷ 21.5, CY = load ÷ 18."
+      />
 
-      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <PageToolbar>
+        <Button variant="outline" size="sm" className="gap-1" onClick={() => setBulkOpen(true)}>
+          <Percent className="h-4 w-4" />
+          Bulk adjust %
+        </Button>
+        {db.meta.haulRateAdjustmentPercent != null && (
+          <span className="text-xs text-gray-500">
+            Last bulk: {db.meta.haulRateAdjustmentPercent > 0 ? "+" : ""}
+            {db.meta.haulRateAdjustmentPercent}%
+          </span>
+        )}
+      </PageToolbar>
+
+      <div className="rounded-xl border border-gray-200 bg-white overflow-hidden max-h-[calc(100vh-220px)] overflow-y-auto">
         <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-100 bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
-              <th className="px-4 py-3 text-left font-medium">Zone</th>
-              <th className="px-4 py-3 text-left font-medium">Min Miles</th>
-              <th className="px-4 py-3 text-left font-medium">Max Miles</th>
-              <th className="px-4 py-3 text-left font-medium">Rate / Ton</th>
+          <thead className="sticky top-0 bg-gray-50 z-10">
+            <tr className="border-b border-gray-100 text-xs text-gray-500 uppercase tracking-wide">
+              <th className="px-4 py-3 text-left font-medium">Mile</th>
+              <th className="px-4 py-3 text-left font-medium">Price / load</th>
+              <th className="px-4 py-3 text-left font-medium">$/TN</th>
+              <th className="px-4 py-3 text-left font-medium">$/CY</th>
+              <th className="px-4 py-3 text-left font-medium w-24" />
             </tr>
           </thead>
           <tbody>
-            {db.haulRates.length === 0 && (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">No rates yet.</td></tr>
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
+                  No rates — run import:atpb or add manually.
+                </td>
+              </tr>
             )}
-            {db.haulRates.map((hr) => (
+            {sorted.map((hr) => (
               <tr key={hr.id} className="border-b border-gray-100 hover:bg-gray-50">
-                <td className="px-4 py-3 font-medium text-gray-900">{hr.zoneName}</td>
-                <td className="px-4 py-3 text-gray-500">{hr.minMiles}</td>
-                <td className="px-4 py-3 text-gray-500">{hr.maxMiles}</td>
-                <td className="px-4 py-3 text-gray-700">{formatCurrency(hr.ratePerTon)}</td>
+                <td className="px-4 py-2 font-medium text-gray-900">{hr.miles}</td>
+                <td className="px-4 py-2">
+                  {editingId === hr.id ? (
+                    <Input
+                      type="number"
+                      step="0.01"
+                      className="h-8 w-28"
+                      value={editLoad}
+                      onChange={(e) => setEditLoad(e.target.value)}
+                    />
+                  ) : (
+                    <span className="text-gray-700">{formatCurrency(hr.ratePerLoad)}</span>
+                  )}
+                </td>
+                <td className="px-4 py-2 text-gray-500">
+                  {formatCurrency(impliedRatePerTon(hr.ratePerLoad))}
+                </td>
+                <td className="px-4 py-2 text-gray-500">
+                  {formatCurrency(impliedRatePerCy(hr.ratePerLoad))}
+                </td>
+                <td className="px-4 py-2">
+                  {editingId === hr.id ? (
+                    <div className="flex gap-1">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        className="h-7 text-xs"
+                        onClick={() => saveRate(hr.id, parseFloat(editLoad) || 0)}
+                      >
+                        Save
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs"
+                        onClick={() => setEditingId(null)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => startEdit(hr)}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      <Sheet open={open} onOpenChange={setOpen}>
-        <SheetContent className="w-[420px]">
-          <SheetHeader><SheetTitle>Add Haul Rate</SheetTitle></SheetHeader>
-          <div className="mt-6 space-y-4">
-            {[["Zone Name", "zoneName"], ["Min Miles", "minMiles"], ["Max Miles", "maxMiles"], ["Rate per Ton ($)", "ratePerTon"]].map(([label, field]) => (
-              <div key={field} className="space-y-1">
-                <label className="text-sm font-medium text-gray-700">{label}</label>
-                <Input
-                  type={field === "zoneName" ? "text" : "number"}
-                  value={(form as Record<string, string>)[field]}
-                  onChange={(e) => setForm({ ...form, [field]: e.target.value })}
-                  placeholder={label}
-                />
-              </div>
-            ))}
-          </div>
-          <div className="absolute bottom-0 left-0 right-0 flex gap-3 border-t bg-white p-4">
-            <Button className="flex-1 bg-[#0f6b4f] hover:bg-[#0d5c43] text-white" onClick={create} disabled={!form.zoneName.trim()}>Add Rate</Button>
-            <Button variant="outline" className="flex-1" onClick={() => setOpen(false)}>Cancel</Button>
-          </div>
-        </SheetContent>
-      </Sheet>
+      <CreateFormSheet
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        title="Bulk adjust haul rates"
+        description="Apply a percentage change to every mile rate (e.g. 10 increases all by 10%)."
+        submitLabel="Apply"
+        onSubmit={applyBulkAdjust}
+        disabled={!bulkPercent.trim()}
+      >
+        <FormSection title="Adjustment" description="Positive = increase, negative = decrease">
+          <FormField label="Percent change" required>
+            <Input
+              type="number"
+              step="0.1"
+              className="h-10"
+              value={bulkPercent}
+              onChange={(e) => setBulkPercent(e.target.value)}
+              placeholder="e.g. 10 or -5"
+            />
+          </FormField>
+        </FormSection>
+      </CreateFormSheet>
     </div>
   );
 }

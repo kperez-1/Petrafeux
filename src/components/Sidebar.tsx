@@ -12,8 +12,11 @@ import {
   Package,
   Settings,
   ChevronDown,
+  Calendar,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useDb } from "@/components/DbProvider";
+import { resolveCurrentUser } from "@/lib/current-user";
 
 interface NavItem {
   label: string;
@@ -22,8 +25,9 @@ interface NavItem {
 }
 
 const SALES: NavItem[] = [
-  { label: "Projects", href: "/projects", icon: FolderOpen },
+  { label: "Projects", href: "/projects/dashboard", icon: FolderOpen },
   { label: "Quotes", href: "/quotes", icon: FileText },
+  { label: "Activities", href: "/activities", icon: Calendar },
 ];
 
 const MASTER_DATA: NavItem[] = [
@@ -36,7 +40,11 @@ const MASTER_DATA: NavItem[] = [
 
 function NavLink({ item }: { item: NavItem }) {
   const pathname = usePathname();
-  const active = pathname === item.href || pathname.startsWith(item.href + "/");
+  const active =
+    pathname === item.href ||
+    (item.href !== "/projects/dashboard" && pathname.startsWith(item.href + "/")) ||
+    (item.href === "/projects/dashboard" &&
+      (pathname.startsWith("/projects") && !pathname.startsWith("/projects/list")));
   const Icon = item.icon;
   return (
     <Link
@@ -64,9 +72,22 @@ function SectionLabel({ label }: { label: string }) {
 }
 
 export function Sidebar() {
+  const { db } = useDb();
+  const user = resolveCurrentUser(db);
+  const office = user?.officeId
+    ? db.offices.find((o) => o.id === user.officeId)
+    : db.offices[0];
+  const initials = user?.name
+    ? user.name
+        .split(" ")
+        .map((w) => w[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase()
+    : "AU";
+
   return (
     <aside className="flex h-screen w-[220px] shrink-0 flex-col bg-[#f0f4f2] border-r border-gray-200">
-      {/* Logo */}
       <div className="flex items-center gap-2 px-4 py-4">
         <div className="flex h-7 w-7 items-center justify-center rounded-full bg-green-500 text-xs font-bold text-white">
           P
@@ -74,19 +95,19 @@ export function Sidebar() {
         <span className="text-sm font-semibold text-gray-900">Petrafi</span>
       </div>
 
-      {/* Org selector */}
       <div className="mx-3 mb-3 flex items-center gap-2 rounded-lg bg-white border border-gray-200 px-3 py-2">
         <div className="flex h-6 w-6 items-center justify-center rounded bg-gray-200 text-[10px] font-bold text-gray-700">
-          AT
+          {office?.code?.slice(0, 2) ?? "AT"}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-medium text-gray-900">AT of Palm Beach</p>
-          <p className="text-[10px] text-gray-400">ATPB</p>
+          <p className="truncate text-xs font-medium text-gray-900">
+            {db.meta.orgName ?? office?.name ?? "AT of Palm Beach"}
+          </p>
+          <p className="text-[10px] text-gray-400">{office?.code ?? db.meta.orgCode ?? "ATPB"}</p>
         </div>
         <ChevronDown className="h-3 w-3 text-gray-400" />
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-2 pb-4">
         <div className="mb-1">
           <SectionLabel label="Sales" />
@@ -103,7 +124,6 @@ export function Sidebar() {
         </div>
       </nav>
 
-      {/* Bottom */}
       <div className="border-t border-gray-200 px-2 py-3 space-y-1">
         <Link
           href="/settings"
@@ -114,11 +134,16 @@ export function Sidebar() {
         </Link>
         <div className="flex items-center gap-2 rounded-md px-3 py-2">
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-300 text-xs font-medium text-gray-700">
-            AU
+            {initials}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium text-gray-900">Admin User</p>
-            <p className="truncate text-[10px] text-gray-400">admin@company.com</p>
+            <p className="truncate text-xs font-medium text-gray-900">
+              {user?.name ?? "Admin User"}
+            </p>
+            <p className="truncate text-[10px] text-gray-400 capitalize">
+              {user?.role ?? "admin"}
+              {office ? ` · ${office.code}` : ""}
+            </p>
           </div>
         </div>
       </div>

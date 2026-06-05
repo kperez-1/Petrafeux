@@ -1,0 +1,1 @@
+ALTER TABLE materials ADD COLUMN price_unit TEXT DEFAULT 'TN';

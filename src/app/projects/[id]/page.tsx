@@ -1,15 +1,23 @@
 "use client";
 
-import { use, useState } from "react";
+import { Suspense, use, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { FolderOpen, MapPin, Calendar, Plus, MoreHorizontal } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FolderOpen, Plus, Pencil } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
-import { formatDate, formatCurrency, generateId } from "@/lib/utils";
-import { generateQuoteNumber } from "@/lib/storage";
-import { Quote } from "@/lib/types";
+import { formatDate, formatCurrency, formatDueDate, generateId } from "@/lib/utils";
+import { calcQuote } from "@/lib/quote-calc";
+import { generateQuoteNumber, isRemote } from "@/lib/storage";
+import { PROJECT_STAGES, Quote } from "@/lib/types";
+import { setProjectStage } from "@/lib/projects";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { DetailHeader } from "@/components/layout";
+import { ActivitiesPanel } from "@/components/activities/ActivitiesPanel";
+import { ProjectFormSheet } from "@/components/projects/ProjectFormSheet";
+import { getActivitiesForProject } from "@/lib/activities";
+import { ProjectEmailTab } from "@/components/projects/ProjectEmailTab";
+import { ProjectBiddersPanel } from "@/components/projects/ProjectBiddersPanel";
 
 const STATUS_STYLES: Record<string, string> = {
   sent: "bg-yellow-100 text-yellow-800 border-yellow-200",
@@ -19,10 +27,21 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  return (
+    <Suspense fallback={<div className="p-8 text-gray-400">Loading project…</div>}>
+      <ProjectDetailPageContent params={params} />
+    </Suspense>
+  );
+}
+
+function ProjectDetailPageContent({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { db, save } = useDb();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const defaultTab = searchParams.get("tab") === "email" ? "email" : "quotes";
   const [creatingQuote, setCreatingQuote] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   async function createQuote() {
     if (!project) return;
@@ -35,9 +54,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
       number: generateQuoteNumber(counter),
       jobName: project.name,
       status: "unsent",
-      taxRate: 7,
+      taxRate: db.meta.defaultTaxRate ?? 7,
       routes: [],
       createdAt: new Date().toISOString(),
+      history: [
+        {
+          id: generateId(),
+          type: "created",
+          at: new Date().toISOString(),
+        },
+      ],
     };
     await save({
       ...db,
@@ -59,48 +85,117 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     );
   }
 
+  const projectActivities = getActivitiesForProject(db, project.id);
+
   return (
     <div className="p-8">
-      {/* Breadcrumb */}
-      <div className="mb-4 flex items-center gap-2 text-sm text-gray-500">
-        <Link href="/projects" className="hover:text-gray-900">Projects</Link>
-        <span>›</span>
-        <span className="text-gray-900">{project.name}</span>
+      <DetailHeader
+        backHref="/projects/dashboard"
+        icon={FolderOpen}
+        title={project.name}
+        description={`${quotes.length} quote${quotes.length !== 1 ? "s" : ""}${project.address ? ` · ${project.address}` : ""}${project.intakeDueDate ? ` · Due ${formatDueDate(project.intakeDueDate)}` : ""} · Created ${formatDate(project.createdAt)}`}
+      />
+
+      <div className="mb-4">
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1"
+          onClick={() => setEditOpen(true)}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+          Edit project
+        </Button>
       </div>
 
-      {/* Project header */}
-      <div className="mb-6 flex items-start gap-4">
-        <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gray-100">
-          <FolderOpen className="h-7 w-7 text-gray-500" />
+      <ProjectFormSheet
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        project={project}
+      />
+
+      <div className="mb-6 flex flex-wrap items-end gap-4 rounded-xl border border-gray-200 bg-white p-4">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-gray-500">Stage</label>
+          <select
+            className="h-9 rounded-md border border-gray-200 bg-white px-2 text-sm"
+            value={project.stage ?? "new"}
+            onChange={async (e) => {
+              const updated = setProjectStage(project, e.target.value as import("@/lib/types").ProjectStage);
+              await save({
+                ...db,
+                projects: db.projects.map((p) => (p.id === id ? updated : p)),
+              });
+            }}
+          >
+            {PROJECT_STAGES.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
         </div>
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-gray-900">{project.name}</h1>
-            <button className="text-gray-400 hover:text-gray-600">
-              <MoreHorizontal className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-4 text-sm text-gray-500">
-            <span className="flex items-center gap-1">
-              <span className="text-gray-400">📋</span>
-              {quotes.length} quote{quotes.length !== 1 ? "s" : ""}
-            </span>
-            {project.address && (
-              <span className="flex items-center gap-1">
-                <MapPin className="h-3.5 w-3.5" />
-                {project.address}
-              </span>
-            )}
-            <span className="flex items-center gap-1">
-              <Calendar className="h-3.5 w-3.5" />
-              Created {formatDate(project.createdAt)}
-            </span>
-          </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-gray-500">Office</label>
+          <select
+            className="h-9 rounded-md border border-gray-200 bg-white px-2 text-sm"
+            value={project.officeId ?? ""}
+            onChange={async (e) => {
+              const officeId = e.target.value || undefined;
+              await save({
+                ...db,
+                projects: db.projects.map((p) =>
+                  p.id === id
+                    ? { ...p, officeId, updatedAt: new Date().toISOString() }
+                    : p
+                ),
+              });
+            }}
+          >
+            <option value="">—</option>
+            {db.offices.map((o) => (
+              <option key={o.id} value={o.id}>
+                {o.code}
+              </option>
+            ))}
+          </select>
         </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-gray-500">Salesperson</label>
+          <select
+            className="h-9 rounded-md border border-gray-200 bg-white px-2 text-sm"
+            value={project.salespersonId ?? ""}
+            onChange={async (e) => {
+              const salespersonId = e.target.value || undefined;
+              await save({
+                ...db,
+                projects: db.projects.map((p) =>
+                  p.id === id
+                    ? { ...p, salespersonId, updatedAt: new Date().toISOString() }
+                    : p
+                ),
+              });
+            }}
+          >
+            <option value="">—</option>
+            {db.users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        {project.archived && (
+          <span className="rounded-full bg-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600">
+            Archived
+          </span>
+        )}
       </div>
+
+      <ProjectBiddersPanel project={project} />
 
       {/* Tabs */}
-      <Tabs defaultValue="quotes">
+      <Tabs defaultValue={defaultTab}>
         <TabsList className="border-b border-gray-200 bg-transparent p-0 h-auto mb-6">
           <TabsTrigger
             value="quotes"
@@ -108,6 +203,20 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
           >
             Quotes
           </TabsTrigger>
+          <TabsTrigger
+            value="activities"
+            className="rounded-none border-b-2 border-transparent px-4 pb-3 pt-0 text-sm data-[state=active]:border-gray-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+          >
+            Activities
+          </TabsTrigger>
+          {!isRemote() && (
+            <TabsTrigger
+              value="email"
+              className="rounded-none border-b-2 border-transparent px-4 pb-3 pt-0 text-sm data-[state=active]:border-gray-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+            >
+              Email
+            </TabsTrigger>
+          )}
           <TabsTrigger
             value="orders"
             className="rounded-none border-b-2 border-transparent px-4 pb-3 pt-0 text-sm data-[state=active]:border-gray-900 data-[state=active]:bg-transparent data-[state=active]:shadow-none"
@@ -150,10 +259,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                   </tr>
                 )}
                 {quotes.map((quote) => {
-                  const routeTotal = quote.routes.reduce((sum, r) => sum + r.haulCost + r.materialCost, 0);
-                  const taxable = quote.routes.filter(r => r.taxable).reduce((sum, r) => sum + r.haulCost + r.materialCost, 0);
-                  const tax = taxable * (quote.taxRate / 100);
-                  const total = routeTotal + tax;
+                  const total = calcQuote(quote, db.meta).total;
                   return (
                     <tr key={quote.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className="px-4 py-3">
@@ -181,6 +287,19 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
             </table>
           </div>
         </TabsContent>
+
+        <TabsContent value="activities">
+          <ActivitiesPanel
+            activities={projectActivities}
+            createDefaults={{ projectId: project.id }}
+          />
+        </TabsContent>
+
+        {!isRemote() && (
+          <TabsContent value="email">
+            <ProjectEmailTab db={db} project={project} />
+          </TabsContent>
+        )}
 
         <TabsContent value="orders">
           <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-gray-400">

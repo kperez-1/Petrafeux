@@ -1,6 +1,7 @@
 "use client";
 
 import { Sidebar } from "./Sidebar";
+import { AppTopBar } from "./layout/AppTopBar";
 import { useDb } from "./DbProvider";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -28,6 +29,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Error loading data: {error}
           </div>
         )}
+        {!loading && <AppTopBar />}
         <main className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex h-full items-center justify-center text-sm text-gray-400">

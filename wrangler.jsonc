@@ -1,5 +1,5 @@
 {
-  "name": "petrafi-inspiration",
+  "name": "petrafi-inspiration-demo-x7k2p9q4",
   "main": ".open-next/worker.js",
   "compatibility_date": "2025-04-01",
   "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
@@ -11,8 +11,7 @@
     {
       "binding": "DB",
       "database_name": "petrafi-db",
-      // Replace with your database_id after running: npx wrangler d1 create petrafi-db
-      "database_id": "REPLACE_WITH_YOUR_DATABASE_ID"
+      "database_id": "08a46330-f1da-42f1-92be-f5662c4a4c86"
     }
   ],
   "vars": {
