@@ -46,3 +46,7 @@ next-env.d.ts
 
 # local API file storage (remote dev without D1)
 .data/
+
+# cursor / agent debug logs
+.cursor/
+debug-*.log
