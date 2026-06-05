@@ -50,3 +50,6 @@ next-env.d.ts
 # cursor / agent debug logs
 .cursor/
 debug-*.log
+
+# local read-only clones of other repos (stack reference)
+.reference/
