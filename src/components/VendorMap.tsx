@@ -1,40 +1,38 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { X, ExternalLink, Search, MapPin, Plus, Loader2, Trash2, Truck } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { X, ExternalLink, Search, MapPin, Plus, Loader2, Trash2, Truck, FileText } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
-import { Vendor, Material, MaterialPriceUnit } from "@/lib/types";
+import { Vendor, Material, MaterialPriceUnit, Quote } from "@/lib/types";
 import { geocodeVendorsMissingCoords, vendorHasCoords } from "@/lib/geocode-vendors";
 import { formatMaterialPrice, formatCurrency, generateId } from "@/lib/utils";
 import { normalizeMaterialUnit } from "@/lib/types";
 import { geocodeAddress } from "@/lib/quote-calc";
 import { lookupHaulRateByMiles, impliedRatePerTon } from "@/lib/haul-pricing";
 import { fetchRoadRoute, RoadRoute } from "@/lib/routing";
+import {
+  applyMapClipboardToRoutes,
+  defaultProjectNameFromAddress,
+  type JobHaulInfo,
+  type MapClipboardItem,
+} from "@/lib/map-clipboard";
+import { buildNewProject } from "@/lib/projects";
+import { generateQuoteNumber } from "@/lib/storage";
+import { resolveCurrentUser } from "@/lib/current-user";
+import { normalizeRouteMaterials } from "@/lib/route-materials";
 
-export interface JobHaulInfo {
-  miles: number;
-  ratePerLoad: number | null;
-  ratePerTon: number | null;
-  approximate: boolean;
-}
+export type { JobHaulInfo, MapClipboardItem };
 
-/** A line the user has staged on the map to apply to a quote. */
-export interface MapClipboardItem {
-  id: string;
-  vendor: Vendor;
-  /** "material" = existing catalog item, "custom" = ad-hoc material, "haul" = hauling-only */
-  kind: "material" | "custom" | "haul";
-  material?: Material;
-  custom?: { name: string; buy: number; unit: MaterialPriceUnit; saveToVendor: boolean };
-  qty: number;
-  /** Snapshot of the haul estimate at the moment it was staged. */
-  haul: JobHaulInfo | null;
+export interface VendorMapJobContext {
+  address: string;
+  name: string;
 }
 
 interface VendorMapProps {
   onClose: () => void;
   /** If provided, the map is opened from a quote — staged clipboard items are applied to the quote */
-  onApplyToQuote?: (items: MapClipboardItem[]) => void;
+  onApplyToQuote?: (items: MapClipboardItem[], job: VendorMapJobContext) => void;
   projectAddress?: string;
   /** Human label for the job site, shown on the map pin and clipboard header */
   projectName?: string;
@@ -42,6 +40,11 @@ interface VendorMapProps {
 
 export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName }: VendorMapProps) {
   const { db, save } = useDb();
+  const router = useRouter();
+  const [jobAddress, setJobAddress] = useState(projectAddress ?? "");
+  const [jobName, setJobName] = useState(projectName ?? "");
+  const [addressGeocoding, setAddressGeocoding] = useState(false);
+  const [startingQuote, setStartingQuote] = useState(false);
   const [batchGeocoding, setBatchGeocoding] = useState(false);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
   const mapRef = useRef<HTMLDivElement>(null);
@@ -83,20 +86,34 @@ export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName
     setBatchGeocoding(false);
   }
 
+  useEffect(() => {
+    setJobAddress(projectAddress ?? "");
+  }, [projectAddress]);
+
+  useEffect(() => {
+    setJobName(projectName ?? "");
+  }, [projectName]);
+
   // Geocode the job/project address (drives the job pin + haul estimates)
   useEffect(() => {
     let cancelled = false;
-    if (!projectAddress?.trim()) {
+    const trimmed = jobAddress.trim();
+    if (!trimmed) {
       setJobCoords(null);
+      setAddressGeocoding(false);
       return;
     }
-    geocodeAddress(projectAddress.trim()).then((coords) => {
-      if (!cancelled) setJobCoords(coords ? { lat: coords.lat, lng: coords.lng } : null);
+    setAddressGeocoding(true);
+    geocodeAddress(trimmed).then((coords) => {
+      if (!cancelled) {
+        setJobCoords(coords ? { lat: coords.lat, lng: coords.lng } : null);
+        setAddressGeocoding(false);
+      }
     });
     return () => {
       cancelled = true;
     };
-  }, [projectAddress]);
+  }, [jobAddress]);
 
   // Per-mile haul rate for a given driving distance (pickup → job)
   const haulFromRoute = useMemo(() => {
@@ -247,7 +264,10 @@ export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName
 
       if (!jobCoords) return;
 
-      const label = projectName ? `📍 ${projectName.length > 20 ? projectName.slice(0, 20) + "…" : projectName}` : "📍 Job site";
+      const displayName = jobName.trim() || defaultProjectNameFromAddress(jobAddress);
+      const label = displayName
+        ? `📍 ${displayName.length > 20 ? displayName.slice(0, 20) + "…" : displayName}`
+        : "📍 Job site";
       const jobIcon = L.divIcon({
         className: "",
         html: `<div style="
@@ -300,7 +320,71 @@ export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName
         map.setView([jobCoords.lat, jobCoords.lng], Math.max(map.getZoom(), 9));
       }
     });
-  }, [mapReady, jobCoords, selectedVendor, selectedRoute, projectName]);
+  }, [mapReady, jobCoords, selectedVendor, selectedRoute, jobName, jobAddress]);
+
+  const jobContext = (): VendorMapJobContext => ({
+    address: jobAddress.trim(),
+    name: jobName.trim() || defaultProjectNameFromAddress(jobAddress),
+  });
+
+  async function startProjectAndQuote() {
+    const address = jobAddress.trim();
+    if (!address || clipboard.length === 0 || startingQuote) return;
+    setStartingQuote(true);
+    try {
+      const currentUser = resolveCurrentUser(db);
+      const name = jobName.trim() || defaultProjectNameFromAddress(address);
+      const project = buildNewProject({
+        name,
+        address,
+        officeId: currentUser?.officeId ?? db.offices[0]?.id,
+        salespersonId: currentUser?.id,
+        stage: "proposal_requested",
+      });
+
+      const counter = (db.meta?.quoteCounter ?? 0) + 1;
+      const quoteId = generateId();
+      const { db: workingDb, routes } = applyMapClipboardToRoutes(
+        db,
+        clipboard,
+        address,
+        quoteId,
+        []
+      );
+
+      const newQuote: Quote = {
+        id: quoteId,
+        projectId: project.id,
+        projectName: project.name,
+        number: generateQuoteNumber(counter),
+        jobName: name,
+        status: "unsent",
+        taxRate: db.meta.defaultTaxRate ?? 7,
+        routes: routes.map(normalizeRouteMaterials),
+        createdAt: new Date().toISOString(),
+        history: [{ id: generateId(), type: "created", at: new Date().toISOString(), note: "From vendor map" }],
+      };
+
+      await save({
+        ...workingDb,
+        projects: [project, ...workingDb.projects],
+        quotes: [newQuote, ...workingDb.quotes],
+        meta: { ...workingDb.meta, quoteCounter: counter },
+      });
+      setClipboard([]);
+      router.push(`/quotes/${quoteId}/edit`);
+    } finally {
+      setStartingQuote(false);
+    }
+  }
+
+  const standaloneHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (jobAddress.trim()) params.set("address", jobAddress.trim());
+    if (jobName.trim()) params.set("name", jobName.trim());
+    const qs = params.toString();
+    return qs ? `/vendor-map?${qs}` : "/vendor-map";
+  }, [jobAddress, jobName]);
 
   function haulSnapshotFor(vendor: Vendor): JobHaulInfo | null {
     return selectedRoute?.vendorId === vendor.id ? haulFromRoute(selectedRoute.route) : null;
@@ -373,21 +457,44 @@ export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName
           {/* Header */}
           <div className="flex items-center gap-3 border-b border-gray-200 px-4 py-3">
             <button
-              className="flex items-center gap-2 rounded-md bg-[#0f6b4f] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#0d5c43]"
+              type="button"
+              className="flex shrink-0 items-center gap-2 rounded-md bg-[#0f6b4f] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#0d5c43]"
             >
               <MapPin className="h-4 w-4" />
               Vendor Map
             </button>
             <a
-              href="/vendor-map/standalone"
+              href={standaloneHref}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900"
+              className="flex shrink-0 items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900"
             >
               <ExternalLink className="h-3.5 w-3.5" />
               Open in new tab
             </a>
-            <div className="flex-1" />
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div className="relative min-w-0 flex-1">
+                <MapPin className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#0f6b4f]" />
+                <input
+                  value={jobAddress}
+                  onChange={(e) => setJobAddress(e.target.value)}
+                  placeholder="Enter job site address…"
+                  className="w-full rounded-lg border-2 border-[#0f6b4f]/40 bg-[#f0f4f2] py-2 pl-9 pr-9 text-sm font-medium placeholder:font-normal placeholder:text-gray-400 focus:border-[#0f6b4f] focus:bg-white focus:outline-none"
+                />
+                {addressGeocoding && (
+                  <Loader2 className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-[#0f6b4f]" />
+                )}
+                {jobCoords && !addressGeocoding && (
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-medium text-[#0f6b4f]">✓</span>
+                )}
+              </div>
+              <input
+                value={jobName}
+                onChange={(e) => setJobName(e.target.value)}
+                placeholder="Project name (optional)"
+                className="w-48 shrink-0 rounded-lg border-2 border-gray-200 bg-gray-50 px-3 py-2 text-sm focus:border-[#0f6b4f] focus:bg-white focus:outline-none"
+              />
+            </div>
             {clipboard.length > 0 && (
               <span className="rounded-full bg-[#0f6b4f] px-2 py-0.5 text-xs font-medium text-white">
                 {clipboard.length} selected
@@ -492,7 +599,7 @@ export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName
                     <div className="min-w-0">
                       <p className="font-semibold text-gray-900">{selectedVendor.name}</p>
                       <p className="text-xs text-gray-400">{selectedVendor.address}</p>
-                      {projectAddress?.trim() && (
+                      {jobAddress.trim() && (
                         <div className="mt-2 rounded-lg bg-[#f0f4f2] px-2.5 py-1.5">
                           {routeLoading ? (
                             <p className="flex items-center gap-1.5 text-[11px] text-gray-500">
@@ -544,9 +651,9 @@ export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName
                       <span className="text-xs text-gray-500">
                         {selectedJobInfo?.ratePerLoad != null
                           ? `${formatCurrency(selectedJobInfo.ratePerLoad)}/load`
-                          : projectAddress?.trim()
+                          : jobAddress.trim()
                             ? "No rate"
-                            : "Open from a project"}
+                            : "Enter job address above"}
                       </span>
                     </button>
 
@@ -671,12 +778,16 @@ export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName
           <div className="max-h-56 overflow-y-auto border-t border-gray-200 bg-gray-50 px-4 py-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="text-sm font-semibold text-gray-700">
-                Clipboard{projectName ? ` · ${projectName}` : ""}{" "}
+                Clipboard{jobName.trim() || jobAddress.trim() ? ` · ${jobContext().name}` : ""}{" "}
                 <span className="font-normal text-gray-400">({clipboard.length})</span>
               </span>
               <div className="flex items-center gap-3">
+                {!jobAddress.trim() && clipboard.length > 0 && (
+                  <span className="text-xs text-amber-700">Enter a job address to estimate hauls</span>
+                )}
                 {clipboard.length > 0 && (
                   <button
+                    type="button"
                     onClick={() => setClipboard([])}
                     className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-800"
                   >
@@ -684,23 +795,41 @@ export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName
                     Clear all
                   </button>
                 )}
-                {onApplyToQuote && (
+                {onApplyToQuote ? (
                   <button
-                    disabled={clipboard.length === 0}
+                    type="button"
+                    disabled={clipboard.length === 0 || !jobAddress.trim()}
                     onClick={() => {
-                      onApplyToQuote(clipboard);
+                      onApplyToQuote(clipboard, jobContext());
                       setClipboard([]);
                     }}
                     className="rounded-md bg-[#0f6b4f] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#0d5c43] disabled:opacity-50"
                   >
                     Apply to Quote ({clipboard.length})
                   </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={clipboard.length === 0 || !jobAddress.trim() || startingQuote}
+                    onClick={startProjectAndQuote}
+                    className="flex items-center gap-1.5 rounded-md bg-[#0f6b4f] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#0d5c43] disabled:opacity-50"
+                  >
+                    {startingQuote ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <FileText className="h-4 w-4" />
+                    )}
+                    Start Project &amp; Quote ({clipboard.length})
+                  </button>
                 )}
               </div>
             </div>
             {clipboard.length === 0 ? (
               <p className="text-xs text-gray-400">
-                Select a vendor on the map, then add materials or a hauling-only line to build the list for this job.
+                Enter the project address above, pick vendors on the map, then add materials or hauling lines.
+                {onApplyToQuote
+                  ? " Apply to the open quote when ready."
+                  : " Start a new project and quote from the clipboard."}
               </p>
             ) : (
               <div className="space-y-1.5">

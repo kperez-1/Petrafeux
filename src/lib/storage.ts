@@ -5,7 +5,14 @@ import { normalizeFullDb } from "./normalize-db";
 const STORAGE_KEY = "petrafi_db_v1";
 
 export function isRemote(): boolean {
-  return process.env.NEXT_PUBLIC_CRM_REMOTE === "true";
+  if (process.env.NEXT_PUBLIC_CRM_REMOTE === "true") return true;
+  // wrangler.jsonc vars apply at Workers runtime only; client bundles need a
+  // runtime host check when NEXT_PUBLIC_* was not set at build time.
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    if (host.endsWith(".workers.dev")) return true;
+  }
+  return false;
 }
 
 // ── Local (browser localStorage) ─────────────────────────────────────────────

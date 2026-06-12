@@ -24,7 +24,8 @@ import {
   emptyMaterialLine,
   upsertCatalogMaterial,
 } from "@/lib/route-materials";
-import { VendorMap, MapClipboardItem } from "@/components/VendorMap";
+import { VendorMap } from "@/components/VendorMap";
+import { applyMapClipboardToRoutes, type MapClipboardItem } from "@/lib/map-clipboard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CreateFormSheet, FormSection, FormField } from "@/components/layout";
@@ -129,124 +130,46 @@ export default function EditQuotePage({ params }: { params: Promise<{ id: string
     );
   }
 
-  // Called from VendorMap when the user applies the staged clipboard to the quote.
-  // Items for the same vendor (and the same jobsite/dropoff) collapse into ONE
-  // route with multiple material lines; hauling-only items add no material line.
-  // Haul buy/sell is pre-filled from the map estimate (buy rounded up to a cent).
   const handleMapApply = useCallback(
-    (items: MapClipboardItem[]) => {
+    (items: MapClipboardItem[], job: { address: string; name: string }) => {
       if (items.length === 0) return;
-      const dropoff = project?.address ?? "";
+      const dropoff = job.address.trim() || project?.address || "";
+      const { db: workingDb, routes: nextRoutes } = applyMapClipboardToRoutes(
+        db,
+        items,
+        dropoff,
+        quote.id,
+        routes
+      );
+      setRoutes(nextRoutes.map(normalizeRouteMaterials));
 
-      // Resolve each item into a material line (persisting saved customs to the
-      // catalog) up front so we only call save() once.
-      let workingDb = db;
-      const lineForItem = new Map<string, RouteMaterialLine | null>();
-      for (const item of items) {
-        if (item.kind === "material" && item.material) {
-          const patch = applyCatalogMaterialToLine(item.material);
-          lineForItem.set(item.id, {
-            ...emptyMaterialLine(),
-            ...patch,
-            materialCost: roundCents(patch.materialCost ?? 0),
-          });
-        } else if (item.kind === "custom" && item.custom) {
-          if (item.custom.saveToVendor) {
-            const res = upsertCatalogMaterial(workingDb, {
-              name: item.custom.name,
-              pricePerTon: item.custom.buy,
-              priceUnit: item.custom.unit,
-              vendorId: item.vendor.id,
-            });
-            workingDb = res.db;
-            const patch = applyCatalogMaterialToLine(res.material);
-            lineForItem.set(item.id, {
-              ...emptyMaterialLine(),
-              ...patch,
-              materialCost: roundCents(patch.materialCost ?? 0),
-            });
-          } else {
-            lineForItem.set(item.id, {
-              ...emptyMaterialLine(),
-              materialName: item.custom.name,
-              materialType: "",
-              materialRate: item.custom.buy,
-              materialCost: roundCents(
-                materialSellFromBuyGp(item.custom.buy, DEFAULT_MATERIAL_GP_PERCENT)
-              ),
-              materialUnit: item.custom.unit,
-            });
-          }
-        } else {
-          lineForItem.set(item.id, null); // hauling-only
-        }
+      if (workingDb !== db || (project && dropoff && dropoff !== project.address)) {
+        void save({
+          ...workingDb,
+          projects: workingDb.projects.map((p) =>
+            p.id === project?.id
+              ? {
+                  ...p,
+                  address: dropoff || p.address,
+                  name: job.name.trim() || p.name,
+                  updatedAt: new Date().toISOString(),
+                }
+              : p
+          ),
+          quotes: workingDb.quotes.map((q) =>
+            q.id === quote.id
+              ? {
+                  ...q,
+                  projectName: job.name.trim() || q.projectName,
+                  jobName: job.name.trim() || q.jobName,
+                }
+              : q
+          ),
+        });
       }
-
-      // Group items by vendor (jobsite is the shared project address)
-      const order: string[] = [];
-      const byVendor = new Map<string, MapClipboardItem[]>();
-      for (const item of items) {
-        if (!byVendor.has(item.vendor.id)) {
-          byVendor.set(item.vendor.id, []);
-          order.push(item.vendor.id);
-        }
-        byVendor.get(item.vendor.id)!.push(item);
-      }
-
-      function haulRatesFromSnapshot(group: MapClipboardItem[]) {
-        const snap = group.find((g) => g.haul && g.haul.ratePerLoad != null)?.haul;
-        if (!snap || snap.ratePerLoad == null) return null;
-        const buy = ceilCents(haulBuyRateForUnit(snap.ratePerLoad, "TN"));
-        return {
-          haulCost: buy,
-          haulRate: roundCents(haulSellFromBuyGp(buy, brokerFeePercent, DEFAULT_HAUL_GP_PERCENT)),
-        };
-      }
-
-      setRoutes((prev) => {
-        const next = [...prev];
-        for (const vendorId of order) {
-          const group = byVendor.get(vendorId)!;
-          const vendor = group[0].vendor;
-          const newLines = group
-            .map((it) => lineForItem.get(it.id))
-            .filter((l): l is RouteMaterialLine => Boolean(l));
-          const haul = haulRatesFromSnapshot(group);
-
-          const existingIdx = next.findIndex(
-            (r) => r.pickupVendorId === vendorId && (r.dropoffAddress ?? "") === dropoff
-          );
-
-          if (existingIdx >= 0) {
-            const existing = next[existingIdx];
-            const mergedLines = [...getRouteMaterials(existing), ...newLines];
-            const needsHaul = !existing.haulCost || existing.haulCost === 0;
-            next[existingIdx] = syncRouteLegacyMaterial({
-              ...existing,
-              ...(needsHaul && haul ? haul : {}),
-              materialLines: mergedLines,
-            });
-          } else {
-            next.push(
-              syncRouteLegacyMaterial({
-                ...emptyRoute(quote.id, next.length),
-                pickupAddress: vendor.address,
-                pickupVendorId: vendor.id,
-                dropoffAddress: dropoff,
-                haulRate: haul?.haulRate ?? 0,
-                haulCost: haul?.haulCost ?? 0,
-                materialLines: newLines,
-              })
-            );
-          }
-        }
-        return next;
-      });
-
-      if (workingDb !== db) void save(workingDb);
       setShowMap(false);
     },
-    [db, save, quote.id, project?.address, brokerFeePercent]
+    [db, save, quote.id, project, routes]
   );
 
   async function handleSave() {
