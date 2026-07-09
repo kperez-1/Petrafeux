@@ -24,6 +24,8 @@ import {
   getQuotesForCompany,
   findCompanySummary,
 } from "@/lib/contractors";
+import { arBalanceSummary, invoicesForCompany } from "@/lib/billing-ledger";
+import { PartyBalanceCard } from "@/components/billing/PartyBalanceCard";
 import { Contractor } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { ActivitiesPanel } from "@/components/activities/ActivitiesPanel";
@@ -52,6 +54,8 @@ export default function CompanyDetailPage({
   const projects = getProjectsForCompany(db, companyName);
   const quotes = getQuotesForCompany(db, companyName);
   const companyActivities = getActivitiesForCompany(db, companyName);
+  const companyInvoices = invoicesForCompany(db, companyName);
+  const arSummary = arBalanceSummary(companyInvoices);
 
   if (!summary && contacts.length === 0) {
     return (
@@ -141,6 +145,19 @@ export default function CompanyDetailPage({
           <p className="text-2xl font-semibold text-gray-900">{contacts.length}</p>
           <p className="text-sm text-gray-500">Contacts</p>
         </div>
+      </div>
+
+      <div className="mb-8 max-w-md">
+        <PartyBalanceCard
+          title="Accounts Receivable"
+          openTotal={arSummary.openTotal}
+          openCount={arSummary.openCount}
+          paidTotal={arSummary.paidTotal}
+          paidCount={arSummary.paidCount}
+          viewHref={`/billing/invoices?bucket=open&company=${slug}`}
+          viewAllHref={`/billing/invoices?bucket=all&company=${slug}`}
+          emptyHint="No invoices yet — billing is created when delivery tickets are approved."
+        />
       </div>
 
       <div className="mb-8">

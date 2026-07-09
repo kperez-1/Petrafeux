@@ -126,6 +126,13 @@ export interface Vendor {
   type: "quarry" | "disposal";
   /** Short-lived material site (excess on a job, gone in weeks/months) */
   temporary?: boolean;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  paymentTermsDays?: number;
+  taxId?: string;
+  w9OnFile?: boolean;
+  w9FileUrl?: string;
 }
 
 /** Material pricing unit codes */
@@ -210,6 +217,12 @@ export interface QuoteRoute {
   pickupAddress: string;
   dropoffAddress: string;
   pickupVendorId?: string;
+  /** Disposal site at dropoff (when haul ends at a landfill etc.) */
+  dropoffVendorId?: string;
+  /** Buy rate per unit paid to disposal vendor */
+  disposalCost?: number;
+  /** Sell rate per unit billed to customer for disposal */
+  disposalRate?: number;
   haulRate: number;
   haulCost: number;
   haulQty: number;
@@ -239,6 +252,12 @@ export type QuoteHistoryType =
   | "rejected"
   | "duplicated_from";
 
+export interface QuoteSendRecipient {
+  email: string;
+  name?: string;
+  contactId?: string;
+}
+
 export interface QuoteHistoryEvent {
   id: string;
   type: QuoteHistoryType;
@@ -262,8 +281,290 @@ export interface Quote {
   history?: QuoteHistoryEvent[];
 }
 
+export interface Carrier {
+  id: string;
+  name: string;
+  contactName?: string;
+  phone: string;
+  email: string;
+  officeId?: string;
+  paymentTermsDays?: number;
+  taxId?: string;
+  w9OnFile?: boolean;
+  w9FileUrl?: string;
+}
+
+export type OrderStatus =
+  | "pending"
+  | "active"
+  | "completed"
+  | "cancelled"
+  | "invoiced";
+
+/** @deprecated legacy statuses mapped via normalizeOrderStatus */
+export type LegacyOrderStatus =
+  | "open"
+  | "dispatching"
+  | "in_progress"
+  | "complete";
+
+export interface OrderHistoryEvent {
+  id: string;
+  type: "created" | "dispatched" | "completed" | "cancelled" | "ticket_approved";
+  at: string;
+  userId?: string;
+  note?: string;
+}
+
+export interface OrderLine {
+  id: string;
+  orderId: string;
+  sortOrder: number;
+  quoteRouteId?: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  pickupVendorId?: string;
+  dropoffVendorId?: string;
+  materialName?: string;
+  materialBuyRate: number;
+  materialSellRate: number;
+  materialUnit?: MaterialPriceUnit;
+  materialQtyQuoted: number;
+  materialLines?: RouteMaterialLine[];
+  disposalBuyRate: number;
+  disposalSellRate: number;
+  haulBuyRate: number;
+  haulSellRate: number;
+  haulUnit?: MaterialPriceUnit;
+  haulQtyQuoted: number;
+  taxable: boolean;
+}
+
+export interface Order {
+  id: string;
+  number: string;
+  projectId: string;
+  quoteId: string;
+  contractorId?: string;
+  jobName: string;
+  taxRate: number;
+  status: OrderStatus;
+  lines: OrderLine[];
+  createdAt: string;
+  officeId?: string;
+  scheduledAt?: string;
+  createdByUserId?: string;
+  salespersonId?: string;
+  taxExempt?: boolean;
+  taxExemptNumber?: string;
+  history?: OrderHistoryEvent[];
+}
+
+export type TripStatus = "assigned" | "en_route" | "delivered" | "cancelled" | "declined";
+
+export interface Trip {
+  id: string;
+  number: string;
+  orderId: string;
+  dispatchId: string;
+  carrierId: string;
+  truckLabel?: string;
+  driverName?: string;
+  status: TripStatus;
+  scheduledDate?: string;
+  createdAt: string;
+}
+
+export type DispatchStatus = "assigned" | "en_route" | "delivered";
+
+export interface Dispatch {
+  id: string;
+  orderId: string;
+  orderLineId: string;
+  carrierId: string;
+  status: DispatchStatus;
+  assignedAt: string;
+  notes?: string;
+  tripId?: string;
+  truckLabel?: string;
+  scheduledDate?: string;
+}
+
+export type DeliveryTicketStatus = "pending_review" | "approved" | "rejected";
+
+export type DeliveryTicketLineType = "haul" | "material" | "disposal";
+
+export interface DeliveryTicket {
+  id: string;
+  number?: string;
+  dispatchId: string;
+  orderId: string;
+  orderLineId: string;
+  tripId?: string;
+  lineType: DeliveryTicketLineType;
+  materialLineId?: string;
+  ticketNumber?: string;
+  paperTicketNumber?: string;
+  qty: number;
+  unit: MaterialPriceUnit;
+  deliveredAt: string;
+  status: DeliveryTicketStatus;
+  ticketImageUrl?: string;
+  rejectedAt?: string;
+  approvedByUserId?: string;
+  driverSellRate?: number;
+  notes?: string;
+}
+
+export type PaymentMethod = "check" | "ach";
+
+export type PaymentDocumentKind =
+  | "ar_invoice"
+  | "carrier_settlement"
+  | "vendor_settlement";
+
+export interface PaymentRecord {
+  id: string;
+  documentId: string;
+  documentKind: PaymentDocumentKind;
+  method: PaymentMethod;
+  amount: number;
+  paidAt: string;
+  reference?: string;
+  recordedByUserId?: string;
+}
+
+export type BillingDocumentSource = "ticket" | "manual";
+
+export type AgingBucket = "current" | "1_30" | "31_60" | "61_90" | "90_plus";
+
+export interface CustomerInvoiceLine {
+  id: string;
+  description: string;
+  qty: number;
+  unit: MaterialPriceUnit;
+  sellRate: number;
+  amount: number;
+  taxable: boolean;
+  orderLineId?: string;
+  deliveryTicketId?: string;
+}
+
+export interface BillingNote {
+  id: string;
+  body: string;
+  createdAt: string;
+}
+
+export type CustomerInvoiceStatus = "draft" | "sent" | "paid" | "void";
+
+export interface CustomerInvoice {
+  id: string;
+  number: string;
+  orderId?: string;
+  projectId?: string;
+  contractorId?: string;
+  status: CustomerInvoiceStatus;
+  subtotal: number;
+  tax: number;
+  total: number;
+  issuedAt: string;
+  dueDate?: string;
+  lines: CustomerInvoiceLine[];
+  notes?: BillingNote[];
+  payments?: PaymentRecord[];
+  sentByUserId?: string;
+  sentAt?: string;
+  attachmentUrl?: string;
+  source?: BillingDocumentSource;
+}
+
+export type CarrierSettlementStatus = "draft" | "approved" | "paid";
+
+export interface CarrierSettlementLine {
+  id: string;
+  description: string;
+  qty: number;
+  unit: MaterialPriceUnit;
+  buyRate: number;
+  grossAmount: number;
+  brokerFee: number;
+  netPay: number;
+  orderLineId?: string;
+  deliveryTicketId?: string;
+}
+
+export interface CarrierSettlement {
+  id: string;
+  number: string;
+  orderId: string;
+  carrierId: string;
+  status: CarrierSettlementStatus;
+  subtotal: number;
+  brokerFee: number;
+  netPay: number;
+  issuedAt: string;
+  dueDate?: string;
+  lines: CarrierSettlementLine[];
+  notes?: BillingNote[];
+  payments?: PaymentRecord[];
+  approvedByUserId?: string;
+  approvedAt?: string;
+}
+
+export type VendorSettlementPayeeKind = "material" | "disposal";
+
+export type VendorSettlementStatus = "draft" | "approved" | "paid" | "disputed";
+
+export interface VendorSettlementDispute {
+  reason: string;
+  correctRate?: number;
+  correctAmount?: number;
+  disputedAt: string;
+  resolvedAt?: string;
+}
+
+export interface VendorSettlementLine {
+  id: string;
+  description: string;
+  qty: number;
+  unit: MaterialPriceUnit;
+  buyRate: number;
+  amount: number;
+  orderLineId?: string;
+  deliveryTicketId?: string;
+}
+
+export interface VendorSettlement {
+  id: string;
+  number: string;
+  orderId?: string;
+  vendorId: string;
+  payeeKind: VendorSettlementPayeeKind;
+  status: VendorSettlementStatus;
+  subtotal: number;
+  netPay: number;
+  issuedAt: string;
+  dueDate?: string;
+  vendorInvoiceNumber?: string;
+  vendorInvoiceDate?: string;
+  lines: VendorSettlementLine[];
+  notes?: BillingNote[];
+  dispute?: VendorSettlementDispute;
+  payments?: PaymentRecord[];
+  approvedByUserId?: string;
+  approvedAt?: string;
+  source?: BillingDocumentSource;
+}
+
 export interface DbMeta {
   quoteCounter: number;
+  orderCounter?: number;
+  tripCounter?: number;
+  ticketCounter?: number;
+  invoiceCounter?: number;
+  settlementCounter?: number;
+  vendorSettlementCounter?: number;
   defaultTaxRate?: number;
   haulBrokerFeePercent?: number;
   haulSellMarginPercent?: number;
@@ -287,6 +588,9 @@ export interface Activity {
   projectId?: string;
   contractorId?: string;
   company?: string;
+  customerInvoiceId?: string;
+  carrierSettlementId?: string;
+  vendorSettlementId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -302,6 +606,14 @@ export interface Db {
   emailIntakes: ProjectEmailIntake[];
   emailAttachments: EmailAttachment[];
   projectBidders: ProjectBidder[];
+  carriers: Carrier[];
+  orders: Order[];
+  trips: Trip[];
+  dispatches: Dispatch[];
+  deliveryTickets: DeliveryTicket[];
+  customerInvoices: CustomerInvoice[];
+  carrierSettlements: CarrierSettlement[];
+  vendorSettlements: VendorSettlement[];
   offices: Office[];
   users: User[];
   meta: DbMeta;

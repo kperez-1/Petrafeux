@@ -55,3 +55,27 @@ export async function saveRemote(db: Db): Promise<void> {
 export function generateQuoteNumber(counter: number): string {
   return `PRP${String(counter).padStart(9, "0")}`;
 }
+
+export function generateOrderNumber(counter: number): string {
+  return `ORD${String(counter).padStart(9, "0")}`;
+}
+
+export function generateInvoiceNumber(counter: number): string {
+  return `INV${String(counter).padStart(9, "0")}`;
+}
+
+export function generateSettlementNumber(counter: number): string {
+  return `STL${String(counter).padStart(9, "0")}`;
+}
+
+export function generateVendorSettlementNumber(counter: number): string {
+  return `VAP${String(counter).padStart(9, "0")}`;
+}
+
+export function generateTripNumber(counter: number): string {
+  return `TRP${String(counter).padStart(9, "0")}`;
+}
+
+export function generateTicketNumber(counter: number): string {
+  return `TKT${String(counter).padStart(9, "0")}`;
+}

@@ -1,4 +1,5 @@
 import { Db, DbMeta, Material, Project, ProjectStage, LegacyHaulRate, Office, OfficeCode } from "./types";
+import { normalizeOrderStatus } from "./order-status";
 import { normalizeHaulRate } from "./haul-pricing";
 
 export const DEFAULT_HAUL_BROKER_FEE_PERCENT = 10;
@@ -35,10 +36,24 @@ export const EMPTY_DB: Db = {
   emailIntakes: [],
   emailAttachments: [],
   projectBidders: [],
+  carriers: [],
+  orders: [],
+  trips: [],
+  dispatches: [],
+  deliveryTickets: [],
+  customerInvoices: [],
+  carrierSettlements: [],
+  vendorSettlements: [],
   offices: seedOffices(),
   users: [],
   meta: {
     quoteCounter: 0,
+    orderCounter: 0,
+    tripCounter: 0,
+    ticketCounter: 0,
+    invoiceCounter: 0,
+    settlementCounter: 0,
+    vendorSettlementCounter: 0,
     defaultTaxRate: DEFAULT_TAX_RATE,
     haulBrokerFeePercent: DEFAULT_HAUL_BROKER_FEE_PERCENT,
     haulSellMarginPercent: DEFAULT_HAUL_SELL_MARGIN_PERCENT,
@@ -50,6 +65,12 @@ export const EMPTY_DB: Db = {
 export function normalizeMeta(meta?: Partial<DbMeta>): DbMeta {
   return {
     quoteCounter: meta?.quoteCounter ?? 0,
+    orderCounter: meta?.orderCounter ?? 0,
+    tripCounter: meta?.tripCounter ?? 0,
+    ticketCounter: meta?.ticketCounter ?? 0,
+    invoiceCounter: meta?.invoiceCounter ?? 0,
+    settlementCounter: meta?.settlementCounter ?? 0,
+    vendorSettlementCounter: meta?.vendorSettlementCounter ?? 0,
     defaultTaxRate: meta?.defaultTaxRate ?? DEFAULT_TAX_RATE,
     haulBrokerFeePercent: meta?.haulBrokerFeePercent ?? DEFAULT_HAUL_BROKER_FEE_PERCENT,
     haulSellMarginPercent: meta?.haulSellMarginPercent ?? DEFAULT_HAUL_SELL_MARGIN_PERCENT,
@@ -105,6 +126,35 @@ export function normalizeDb(raw: Partial<Db> | null | undefined): Db {
     emailIntakes: raw.emailIntakes ?? [],
     emailAttachments: raw.emailAttachments ?? [],
     projectBidders: raw.projectBidders ?? [],
+    carriers: raw.carriers ?? [],
+    orders: (raw.orders ?? []).map((o) => ({
+      ...o,
+      status: normalizeOrderStatus(o.status),
+      lines: (o.lines ?? []).map((l) => ({
+        ...l,
+        disposalBuyRate: l.disposalBuyRate ?? 0,
+        disposalSellRate: l.disposalSellRate ?? 0,
+      })),
+      history: o.history ?? [],
+    })),
+    trips: raw.trips ?? [],
+    dispatches: raw.dispatches ?? [],
+    deliveryTickets: (raw.deliveryTickets ?? []).map((t) => ({
+      ...t,
+      paperTicketNumber: t.paperTicketNumber ?? t.ticketNumber,
+    })),
+    customerInvoices: (raw.customerInvoices ?? []).map((inv) => ({
+      ...inv,
+      lines: inv.lines ?? [],
+    })),
+    carrierSettlements: (raw.carrierSettlements ?? []).map((s) => ({
+      ...s,
+      lines: s.lines ?? [],
+    })),
+    vendorSettlements: (raw.vendorSettlements ?? []).map((s) => ({
+      ...s,
+      lines: s.lines ?? [],
+    })),
   };
 }
 

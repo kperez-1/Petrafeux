@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useState, useMemo } from "react";
 import Link from "next/link";
 import {
   Store,
@@ -28,6 +28,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { VendorFormSheet } from "@/components/VendorFormSheet";
+import { PartyBalanceCard } from "@/components/billing/PartyBalanceCard";
+import { apBalanceSummary, apRowsForVendor } from "@/lib/billing-ledger";
 import { Pencil } from "lucide-react";
 
 function hasCoords(v: Vendor): boolean {
@@ -57,6 +59,11 @@ export default function VendorDetailPage({ params }: { params: Promise<{ id: str
 
   const vendor = db.vendors.find((v) => v.id === id);
   const materials = db.materials.filter((m) => m.vendorId === id);
+  const vendorApRows = useMemo(
+    () => (vendor ? apRowsForVendor(db, vendor.id) : []),
+    [db, vendor]
+  );
+  const apSummary = useMemo(() => apBalanceSummary(vendorApRows), [vendorApRows]);
 
   if (!vendor) {
     return (
@@ -207,6 +214,68 @@ export default function VendorDetailPage({ params }: { params: Promise<{ id: str
         onOpenChange={setVendorEditOpen}
         vendor={vendor}
       />
+
+      <div className="mb-8 max-w-md">
+        <PartyBalanceCard
+          title="Accounts Payable"
+          owedLabel="We owe"
+          paidLabel="Paid"
+          openTotal={apSummary.openTotal}
+          openCount={apSummary.openCount}
+          paidTotal={apSummary.paidTotal}
+          paidCount={apSummary.paidCount}
+          viewHref={`/billing/ap?bucket=open&tab=vendors&vendorId=${vendor.id}`}
+          viewAllHref={`/billing/ap?bucket=all&tab=vendors&vendorId=${vendor.id}`}
+          emptyHint="No payables yet — vendor bills are created when material or disposal tickets are approved."
+        />
+      </div>
+
+      {(vendor.contactName ||
+        vendor.contactEmail ||
+        vendor.contactPhone ||
+        vendor.paymentTermsDays != null ||
+        vendor.taxId ||
+        vendor.w9OnFile) && (
+        <div className="mb-8 max-w-md rounded-xl border border-gray-200 bg-white p-5 text-sm">
+          <h2 className="mb-3 font-semibold text-gray-900">AP profile</h2>
+          <dl className="space-y-2 text-gray-600">
+            {vendor.contactName && (
+              <div className="flex justify-between gap-2">
+                <dt>Contact</dt>
+                <dd className="text-right font-medium text-gray-900">{vendor.contactName}</dd>
+              </div>
+            )}
+            {vendor.contactEmail && (
+              <div className="flex justify-between gap-2">
+                <dt>Email</dt>
+                <dd className="text-right">{vendor.contactEmail}</dd>
+              </div>
+            )}
+            {vendor.contactPhone && (
+              <div className="flex justify-between gap-2">
+                <dt>Phone</dt>
+                <dd className="text-right">{vendor.contactPhone}</dd>
+              </div>
+            )}
+            {vendor.paymentTermsDays != null && (
+              <div className="flex justify-between gap-2">
+                <dt>Payment terms</dt>
+                <dd className="text-right">Net {vendor.paymentTermsDays}</dd>
+              </div>
+            )}
+            {vendor.taxId && (
+              <div className="flex justify-between gap-2">
+                <dt>Tax ID (EIN)</dt>
+                <dd className="text-right font-mono text-xs">{vendor.taxId}</dd>
+              </div>
+            )}
+            <div className="flex justify-between gap-2">
+              <dt>W-9 on file</dt>
+              <dd className="text-right">{vendor.w9OnFile ? "Yes" : "No"}</dd>
+            </div>
+          </dl>
+        </div>
+      )}
 
       <div className="mb-4 flex items-center justify-between">
         <div className="flex items-center gap-3">

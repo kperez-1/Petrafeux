@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { Calendar, Search, CheckCircle2 } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
 import {
@@ -13,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
   ACTIVITY_TYPE_LABELS,
+  activityBillingHref,
   activityRelationLabel,
   formatActivityWhen,
   sortActivities,
@@ -128,11 +130,21 @@ export default function ActivitiesPage() {
                 </td>
               </tr>
             )}
-            {filtered.map((a) => (
+            {filtered.map((a) => {
+              const billingHref = activityBillingHref(db, a);
+              return (
               <tr key={a.id} className="border-b border-gray-100 hover:bg-gray-50">
                 <td className="px-4 py-3 text-gray-600">{ACTIVITY_TYPE_LABELS[a.type]}</td>
                 <td className="px-4 py-3 font-medium text-gray-900">{a.subject}</td>
-                <td className="px-4 py-3 text-gray-500">{activityRelationLabel(db, a)}</td>
+                <td className="px-4 py-3 text-gray-500">
+                  {billingHref ? (
+                    <Link href={billingHref} className="text-[#0f6b4f] hover:underline">
+                      {activityRelationLabel(db, a)}
+                    </Link>
+                  ) : (
+                    activityRelationLabel(db, a)
+                  )}
+                </td>
                 <td className="px-4 py-3 text-gray-500">{formatActivityWhen(a)}</td>
                 <td className="px-4 py-3">
                   <span
@@ -158,7 +170,8 @@ export default function ActivitiesPage() {
                   )}
                 </td>
               </tr>
-            ))}
+            );
+            })}
           </tbody>
         </table>
       </div>

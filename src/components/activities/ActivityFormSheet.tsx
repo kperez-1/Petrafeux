@@ -14,6 +14,9 @@ export type ActivityFormDefaults = {
   projectId?: string;
   contractorId?: string;
   company?: string;
+  customerInvoiceId?: string;
+  carrierSettlementId?: string;
+  vendorSettlementId?: string;
 };
 
 export function ActivityFormSheet({
@@ -34,9 +37,15 @@ export function ActivityFormSheet({
   const [projectId, setProjectId] = useState("");
   const [company, setCompany] = useState("");
   const [contractorId, setContractorId] = useState("");
+  const [customerInvoiceId, setCustomerInvoiceId] = useState("");
+  const [carrierSettlementId, setCarrierSettlementId] = useState("");
+  const [vendorSettlementId, setVendorSettlementId] = useState("");
 
   const companies = uniqueCompanies(db.contractors);
   const companyContacts = company ? contactsForCompany(db.contractors, company) : [];
+  const billingContext = Boolean(
+    customerInvoiceId || carrierSettlementId || vendorSettlementId
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -51,6 +60,9 @@ export function ActivityFormSheet({
     setProjectId(defaults?.projectId ?? "");
     setCompany(defaults?.company ?? "");
     setContractorId(defaults?.contractorId ?? "");
+    setCustomerInvoiceId(defaults?.customerInvoiceId ?? "");
+    setCarrierSettlementId(defaults?.carrierSettlementId ?? "");
+    setVendorSettlementId(defaults?.vendorSettlementId ?? "");
   }, [open, defaults]);
 
   async function submit() {
@@ -67,6 +79,9 @@ export function ActivityFormSheet({
       projectId: projectId || undefined,
       contractorId: contractorId || undefined,
       company: company.trim() || undefined,
+      customerInvoiceId: customerInvoiceId || undefined,
+      carrierSettlementId: carrierSettlementId || undefined,
+      vendorSettlementId: vendorSettlementId || undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -125,48 +140,50 @@ export function ActivityFormSheet({
           />
         </FormField>
       </FormSection>
-      <FormSection title="Related to" description="Link to a job, company, or contact">
-        <FormField label="Project (job)">
-          <ProjectPickerField
-            value={projectId}
-            onChange={setProjectId}
-            placeholder="None"
-          />
-        </FormField>
-        <FormField label="Company">
-          <select
-            className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm"
-            value={company}
-            onChange={(e) => {
-              setCompany(e.target.value);
-              setContractorId("");
-            }}
-          >
-            <option value="">None</option>
-            {companies.map((co) => (
-              <option key={co} value={co}>
-                {co}
-              </option>
-            ))}
-          </select>
-        </FormField>
-        {company && (
-          <FormField label="Contact">
+      {!billingContext && (
+        <FormSection title="Related to" description="Link to a job, company, or contact">
+          <FormField label="Project (job)">
+            <ProjectPickerField
+              value={projectId}
+              onChange={setProjectId}
+              placeholder="None"
+            />
+          </FormField>
+          <FormField label="Company">
             <select
               className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm"
-              value={contractorId}
-              onChange={(e) => setContractorId(e.target.value)}
+              value={company}
+              onChange={(e) => {
+                setCompany(e.target.value);
+                setContractorId("");
+              }}
             >
-              <option value="">Company only</option>
-              {companyContacts.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.firstName} {c.lastName}
+              <option value="">None</option>
+              {companies.map((co) => (
+                <option key={co} value={co}>
+                  {co}
                 </option>
               ))}
             </select>
           </FormField>
-        )}
-      </FormSection>
+          {company && (
+            <FormField label="Contact">
+              <select
+                className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm"
+                value={contractorId}
+                onChange={(e) => setContractorId(e.target.value)}
+              >
+                <option value="">Company only</option>
+                {companyContacts.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.firstName} {c.lastName}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          )}
+        </FormSection>
+      )}
     </CreateFormSheet>
   );
 }

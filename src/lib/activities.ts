@@ -53,11 +53,35 @@ export function getActivitiesForQuote(db: Db, quote: Quote): Activity[] {
   return sortActivities(list);
 }
 
+export function getActivitiesForInvoice(db: Db, invoiceId: string): Activity[] {
+  return sortActivities(db.activities.filter((a) => a.customerInvoiceId === invoiceId));
+}
+
+export function getActivitiesForCarrierSettlement(db: Db, settlementId: string): Activity[] {
+  return sortActivities(db.activities.filter((a) => a.carrierSettlementId === settlementId));
+}
+
+export function getActivitiesForVendorSettlement(db: Db, settlementId: string): Activity[] {
+  return sortActivities(db.activities.filter((a) => a.vendorSettlementId === settlementId));
+}
+
 export function activityRelationLabel(
   db: Db,
   activity: Activity
 ): string {
   const parts: string[] = [];
+  if (activity.customerInvoiceId) {
+    const inv = db.customerInvoices.find((x) => x.id === activity.customerInvoiceId);
+    parts.push(inv ? `Invoice: ${inv.number}` : "Invoice");
+  }
+  if (activity.carrierSettlementId) {
+    const s = db.carrierSettlements.find((x) => x.id === activity.carrierSettlementId);
+    parts.push(s ? `Settlement: ${s.number}` : "Settlement");
+  }
+  if (activity.vendorSettlementId) {
+    const s = db.vendorSettlements.find((x) => x.id === activity.vendorSettlementId);
+    parts.push(s ? `Payable: ${s.number}` : "Payable");
+  }
   if (activity.projectId) {
     const p = db.projects.find((x) => x.id === activity.projectId);
     parts.push(p ? `Job: ${p.name}` : "Job");
@@ -84,6 +108,19 @@ export function uniqueCompanies(contractors: Contractor[]): string[] {
 export function contactsForCompany(contractors: Contractor[], company: string): Contractor[] {
   const key = company.trim().toLowerCase();
   return contractors.filter((c) => c.company.trim().toLowerCase() === key);
+}
+
+export function activityBillingHref(db: Db, activity: Activity): string | undefined {
+  if (activity.customerInvoiceId) {
+    return `/billing/invoices/${activity.customerInvoiceId}`;
+  }
+  if (activity.carrierSettlementId) {
+    return `/billing/ap/${activity.carrierSettlementId}?kind=carrier`;
+  }
+  if (activity.vendorSettlementId) {
+    return `/billing/ap/${activity.vendorSettlementId}?kind=vendor`;
+  }
+  return undefined;
 }
 
 export function formatActivityWhen(activity: Activity): string {

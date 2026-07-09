@@ -11,6 +11,15 @@ import {
   RouteMaterialLine,
   Activity,
   ProjectStage,
+  Order,
+  OrderLine,
+  Dispatch,
+  DeliveryTicket,
+  CustomerInvoice,
+  CarrierSettlement,
+  VendorSettlement,
+  Trip,
+  PaymentRecord,
 } from "./types";
 import { EMPTY_DB, normalizeMeta, seedOffices } from "./db-defaults";
 import { normalizeFullDb } from "./normalize-db";
@@ -20,6 +29,15 @@ import { normalizeRouteMaterials, syncRouteLegacyMaterial } from "./route-materi
 import { parseHaulRatesTxt } from "./haul-rates-seed";
 
 const DATA_FILE = path.join(process.cwd(), ".data", "petrafi-db.json");
+
+function parseJson<T>(raw: unknown): T | undefined {
+  if (!raw) return undefined;
+  try {
+    return JSON.parse(String(raw)) as T;
+  } catch {
+    return undefined;
+  }
+}
 const BUNDLED_HAUL_FILE = path.join(process.cwd(), "data", "haul-rates-per-mile.txt");
 
 /** Parse a JSON array of photo data URLs stored in the materials.photos column. */
@@ -90,6 +108,12 @@ async function loadMeta(d1: D1Database): Promise<DbMeta> {
   const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
   return normalizeMeta({
     quoteCounter: parseInt(String(map.quote_counter ?? "0"), 10) || 0,
+    orderCounter: parseInt(String(map.order_counter ?? "0"), 10) || 0,
+    invoiceCounter: parseInt(String(map.invoice_counter ?? "0"), 10) || 0,
+    settlementCounter: parseInt(String(map.settlement_counter ?? "0"), 10) || 0,
+    vendorSettlementCounter: parseInt(String(map.vendor_settlement_counter ?? "0"), 10) || 0,
+    tripCounter: parseInt(String(map.trip_counter ?? "0"), 10) || 0,
+    ticketCounter: parseInt(String(map.ticket_counter ?? "0"), 10) || 0,
     defaultTaxRate: parseFloat(String(map.default_tax_rate ?? "7")),
     haulBrokerFeePercent: parseFloat(String(map.haul_broker_fee_percent ?? "10")),
     haulSellMarginPercent: parseFloat(String(map.haul_sell_margin_percent ?? "15")),
@@ -105,6 +129,12 @@ async function loadMeta(d1: D1Database): Promise<DbMeta> {
 async function saveMeta(d1: D1Database, meta: DbMeta): Promise<void> {
   const pairs: [string, string][] = [
     ["quote_counter", String(meta.quoteCounter)],
+    ["order_counter", String(meta.orderCounter ?? 0)],
+    ["invoice_counter", String(meta.invoiceCounter ?? 0)],
+    ["settlement_counter", String(meta.settlementCounter ?? 0)],
+    ["vendor_settlement_counter", String(meta.vendorSettlementCounter ?? 0)],
+    ["trip_counter", String(meta.tripCounter ?? 0)],
+    ["ticket_counter", String(meta.ticketCounter ?? 0)],
     ["default_tax_rate", String(meta.defaultTaxRate ?? 7)],
     ["haul_broker_fee_percent", String(meta.haulBrokerFeePercent ?? 10)],
     ["haul_sell_margin_percent", String(meta.haulSellMarginPercent ?? 15)],
@@ -168,6 +198,9 @@ async function loadFromD1(d1: D1Database): Promise<Db> {
         pickupAddress: String(row.pickup_address ?? ""),
         dropoffAddress: String(row.dropoff_address ?? ""),
         pickupVendorId: row.pickup_vendor_id ? String(row.pickup_vendor_id) : undefined,
+        dropoffVendorId: row.dropoff_vendor_id ? String(row.dropoff_vendor_id) : undefined,
+        disposalCost: row.disposal_cost != null ? Number(row.disposal_cost) : undefined,
+        disposalRate: row.disposal_rate != null ? Number(row.disposal_rate) : undefined,
         haulRate: Number(row.haul_rate) || 0,
         haulCost: Number(row.haul_cost) || 0,
         haulQty: Number(row.haul_qty) || 0,
@@ -227,6 +260,14 @@ async function loadFromD1(d1: D1Database): Promise<Db> {
       lng: r.lng != null ? Number(r.lng) : undefined,
       type: (r.type === "disposal" ? "disposal" : "quarry") as "quarry" | "disposal",
       temporary: Number(r.temporary) === 1 ? true : undefined,
+      contactName: r.contact_name ? String(r.contact_name) : undefined,
+      contactEmail: r.contact_email ? String(r.contact_email) : undefined,
+      contactPhone: r.contact_phone ? String(r.contact_phone) : undefined,
+      paymentTermsDays:
+        r.payment_terms_days != null ? Number(r.payment_terms_days) : undefined,
+      taxId: r.tax_id ? String(r.tax_id) : undefined,
+      w9OnFile: Number(r.w9_on_file) === 1 ? true : undefined,
+      w9FileUrl: r.w9_file_url ? String(r.w9_file_url) : undefined,
     })),
     materials: materials.results.map((r) => ({
       id: String(r.id),
@@ -289,6 +330,14 @@ async function loadFromD1(d1: D1Database): Promise<Db> {
     emailIntakes: [],
     emailAttachments: [],
     projectBidders: [],
+    carriers: [],
+    orders: [],
+    trips: [],
+    dispatches: [],
+    deliveryTickets: [],
+    customerInvoices: [],
+    carrierSettlements: [],
+    vendorSettlements: [],
   };
 
   try {
@@ -304,6 +353,9 @@ async function loadFromD1(d1: D1Database): Promise<Db> {
       projectId: r.project_id ? String(r.project_id) : undefined,
       contractorId: r.contractor_id ? String(r.contractor_id) : undefined,
       company: r.company ? String(r.company) : undefined,
+      customerInvoiceId: r.customer_invoice_id ? String(r.customer_invoice_id) : undefined,
+      carrierSettlementId: r.carrier_settlement_id ? String(r.carrier_settlement_id) : undefined,
+      vendorSettlementId: r.vendor_settlement_id ? String(r.vendor_settlement_id) : undefined,
       createdAt: String(r.created_at),
       updatedAt: String(r.updated_at),
     }));
@@ -358,6 +410,281 @@ async function loadFromD1(d1: D1Database): Promise<Db> {
     }));
   } catch {
     /* migration 0011 */
+  }
+
+  try {
+    const carriersResult = await d1.prepare("SELECT * FROM carriers").all();
+    db.carriers = carriersResult.results.map((r) => ({
+      id: String(r.id),
+      name: String(r.name),
+      contactName: r.contact_name ? String(r.contact_name) : undefined,
+      phone: String(r.phone ?? ""),
+      email: String(r.email ?? ""),
+      officeId: r.office_id ? String(r.office_id) : undefined,
+      paymentTermsDays:
+        r.payment_terms_days != null ? Number(r.payment_terms_days) : undefined,
+      taxId: r.tax_id ? String(r.tax_id) : undefined,
+      w9OnFile: Number(r.w9_on_file) === 1 ? true : undefined,
+      w9FileUrl: r.w9_file_url ? String(r.w9_file_url) : undefined,
+    }));
+
+    const orderLinesResult = await d1.prepare("SELECT * FROM order_lines ORDER BY sort_order").all();
+    const linesByOrder = new Map<string, OrderLine[]>();
+    for (const row of orderLinesResult.results) {
+      const orderId = String(row.order_id);
+      let materialLines: RouteMaterialLine[] | undefined;
+      if (row.material_lines) {
+        try {
+          materialLines = JSON.parse(String(row.material_lines)) as RouteMaterialLine[];
+        } catch {
+          materialLines = undefined;
+        }
+      }
+      const list = linesByOrder.get(orderId) ?? [];
+      list.push({
+        id: String(row.id),
+        orderId,
+        sortOrder: Number(row.sort_order) || 0,
+        quoteRouteId: row.quote_route_id ? String(row.quote_route_id) : undefined,
+        pickupAddress: String(row.pickup_address ?? ""),
+        dropoffAddress: String(row.dropoff_address ?? ""),
+        pickupVendorId: row.pickup_vendor_id ? String(row.pickup_vendor_id) : undefined,
+        dropoffVendorId: row.dropoff_vendor_id ? String(row.dropoff_vendor_id) : undefined,
+        materialName: row.material_name ? String(row.material_name) : undefined,
+        materialBuyRate: Number(row.material_buy_rate) || 0,
+        materialSellRate: Number(row.material_sell_rate) || 0,
+        materialUnit: normalizeMaterialUnit(row.material_unit as string | undefined),
+        materialQtyQuoted: Number(row.material_qty_quoted) || 0,
+        materialLines,
+        disposalBuyRate: Number(row.disposal_buy_rate) || 0,
+        disposalSellRate: Number(row.disposal_sell_rate) || 0,
+        haulBuyRate: Number(row.haul_buy_rate) || 0,
+        haulSellRate: Number(row.haul_sell_rate) || 0,
+        haulUnit: normalizeMaterialUnit(row.haul_unit as string | undefined),
+        haulQtyQuoted: Number(row.haul_qty_quoted) || 0,
+        taxable: Boolean(row.taxable),
+      });
+      linesByOrder.set(orderId, list);
+    }
+
+    const ordersResult = await d1.prepare("SELECT * FROM orders ORDER BY created_at DESC").all();
+    db.orders = ordersResult.results.map((r) => {
+      const id = String(r.id);
+      let history: Order["history"] = [];
+      if (r.history_json) {
+        try {
+          history = JSON.parse(String(r.history_json)) as Order["history"];
+        } catch {
+          history = [];
+        }
+      }
+      return {
+        id,
+        number: String(r.number),
+        projectId: String(r.project_id),
+        quoteId: String(r.quote_id),
+        contractorId: r.contractor_id ? String(r.contractor_id) : undefined,
+        jobName: String(r.job_name),
+        taxRate: Number(r.tax_rate) || 0,
+        status: String(r.status) as Order["status"],
+        lines: linesByOrder.get(id) ?? [],
+        createdAt: String(r.created_at),
+        officeId: r.office_id ? String(r.office_id) : undefined,
+        scheduledAt: r.scheduled_at ? String(r.scheduled_at) : undefined,
+        createdByUserId: r.created_by_user_id ? String(r.created_by_user_id) : undefined,
+        salespersonId: r.salesperson_id ? String(r.salesperson_id) : undefined,
+        taxExempt: Boolean(r.tax_exempt),
+        taxExemptNumber: r.tax_exempt_number ? String(r.tax_exempt_number) : undefined,
+        history,
+      };
+    });
+
+    try {
+      const tripsResult = await d1.prepare("SELECT * FROM trips").all();
+      db.trips = tripsResult.results.map((r) => ({
+        id: String(r.id),
+        number: String(r.number),
+        orderId: String(r.order_id),
+        dispatchId: String(r.dispatch_id),
+        carrierId: String(r.carrier_id),
+        truckLabel: r.truck_label ? String(r.truck_label) : undefined,
+        driverName: r.driver_name ? String(r.driver_name) : undefined,
+        status: String(r.status) as Trip["status"],
+        scheduledDate: r.scheduled_date ? String(r.scheduled_date) : undefined,
+        createdAt: String(r.created_at),
+      }));
+    } catch {
+      db.trips = [];
+    }
+
+    const dispatchesResult = await d1.prepare("SELECT * FROM dispatches").all();
+    db.dispatches = dispatchesResult.results.map((r) => ({
+      id: String(r.id),
+      orderId: String(r.order_id),
+      orderLineId: String(r.order_line_id),
+      carrierId: String(r.carrier_id),
+      status: String(r.status) as Dispatch["status"],
+      assignedAt: String(r.assigned_at),
+      notes: r.notes ? String(r.notes) : undefined,
+      tripId: r.trip_id ? String(r.trip_id) : undefined,
+      truckLabel: r.truck_label ? String(r.truck_label) : undefined,
+      scheduledDate: r.scheduled_date ? String(r.scheduled_date) : undefined,
+    }));
+
+    const ticketsResult = await d1.prepare("SELECT * FROM delivery_tickets").all();
+    db.deliveryTickets = ticketsResult.results.map((r) => ({
+      id: String(r.id),
+      dispatchId: String(r.dispatch_id),
+      orderId: String(r.order_id),
+      orderLineId: String(r.order_line_id),
+      lineType: String(r.line_type) as DeliveryTicket["lineType"],
+      materialLineId: r.material_line_id ? String(r.material_line_id) : undefined,
+      number: r.number ? String(r.number) : undefined,
+      ticketNumber: r.ticket_number ? String(r.ticket_number) : undefined,
+      paperTicketNumber: r.paper_ticket_number
+        ? String(r.paper_ticket_number)
+        : r.ticket_number
+          ? String(r.ticket_number)
+          : undefined,
+      tripId: r.trip_id ? String(r.trip_id) : undefined,
+      qty: Number(r.qty) || 0,
+      unit: normalizeMaterialUnit(r.unit as string | undefined),
+      deliveredAt: String(r.delivered_at),
+      status: String(r.status) as DeliveryTicket["status"],
+      ticketImageUrl: r.ticket_image_url ? String(r.ticket_image_url) : undefined,
+      rejectedAt: r.rejected_at ? String(r.rejected_at) : undefined,
+      approvedByUserId: r.approved_by_user_id ? String(r.approved_by_user_id) : undefined,
+      driverSellRate: r.driver_sell_rate != null ? Number(r.driver_sell_rate) : undefined,
+      notes: r.notes ? String(r.notes) : undefined,
+    }));
+
+    const invoicesResult = await d1.prepare("SELECT * FROM customer_invoices ORDER BY issued_at DESC").all();
+    db.customerInvoices = invoicesResult.results.map((r) => {
+      let lines: CustomerInvoice["lines"] = [];
+      let notes: CustomerInvoice["notes"];
+      try {
+        lines = r.lines_json ? (JSON.parse(String(r.lines_json)) as CustomerInvoice["lines"]) : [];
+      } catch {
+        lines = [];
+      }
+      try {
+        notes = r.notes_json
+          ? (JSON.parse(String(r.notes_json)) as CustomerInvoice["notes"])
+          : undefined;
+      } catch {
+        notes = undefined;
+      }
+      return {
+        id: String(r.id),
+        number: String(r.number),
+        orderId: r.order_id ? String(r.order_id) : undefined,
+        projectId: r.project_id ? String(r.project_id) : undefined,
+        contractorId: r.contractor_id ? String(r.contractor_id) : undefined,
+        status: String(r.status) as CustomerInvoice["status"],
+        subtotal: Number(r.subtotal) || 0,
+        tax: Number(r.tax) || 0,
+        total: Number(r.total) || 0,
+        issuedAt: String(r.issued_at),
+        dueDate: r.due_date ? String(r.due_date) : undefined,
+        lines,
+        notes,
+        payments: parseJson<PaymentRecord[]>(r.payments_json),
+        sentByUserId: r.sent_by_user_id ? String(r.sent_by_user_id) : undefined,
+        sentAt: r.sent_at ? String(r.sent_at) : undefined,
+        attachmentUrl: r.attachment_url ? String(r.attachment_url) : undefined,
+        source: r.source ? (String(r.source) as CustomerInvoice["source"]) : undefined,
+      };
+    });
+
+    const settlementsResult = await d1.prepare("SELECT * FROM carrier_settlements ORDER BY issued_at DESC").all();
+    db.carrierSettlements = settlementsResult.results.map((r) => {
+      let lines: CarrierSettlement["lines"] = [];
+      let notes: CarrierSettlement["notes"];
+      try {
+        lines = r.lines_json ? (JSON.parse(String(r.lines_json)) as CarrierSettlement["lines"]) : [];
+      } catch {
+        lines = [];
+      }
+      try {
+        notes = r.notes_json
+          ? (JSON.parse(String(r.notes_json)) as CarrierSettlement["notes"])
+          : undefined;
+      } catch {
+        notes = undefined;
+      }
+      return {
+        id: String(r.id),
+        number: String(r.number),
+        orderId: String(r.order_id),
+        carrierId: String(r.carrier_id),
+        status: String(r.status) as CarrierSettlement["status"],
+        subtotal: Number(r.subtotal) || 0,
+        brokerFee: Number(r.broker_fee) || 0,
+        netPay: Number(r.net_pay) || 0,
+        issuedAt: String(r.issued_at),
+        dueDate: r.due_date ? String(r.due_date) : undefined,
+        lines,
+        notes,
+        payments: parseJson<PaymentRecord[]>(r.payments_json),
+        approvedByUserId: r.approved_by_user_id ? String(r.approved_by_user_id) : undefined,
+        approvedAt: r.approved_at ? String(r.approved_at) : undefined,
+      };
+    });
+
+    const vendorSettlementsResult = await d1
+      .prepare("SELECT * FROM vendor_settlements ORDER BY issued_at DESC")
+      .all();
+    db.vendorSettlements = vendorSettlementsResult.results.map((r) => {
+      let lines: VendorSettlement["lines"] = [];
+      let notes: VendorSettlement["notes"];
+      let dispute: VendorSettlement["dispute"];
+      try {
+        lines = r.lines_json ? (JSON.parse(String(r.lines_json)) as VendorSettlement["lines"]) : [];
+      } catch {
+        lines = [];
+      }
+      try {
+        notes = r.notes_json
+          ? (JSON.parse(String(r.notes_json)) as VendorSettlement["notes"])
+          : undefined;
+      } catch {
+        notes = undefined;
+      }
+      try {
+        dispute = r.dispute_json
+          ? (JSON.parse(String(r.dispute_json)) as VendorSettlement["dispute"])
+          : undefined;
+      } catch {
+        dispute = undefined;
+      }
+      return {
+        id: String(r.id),
+        number: String(r.number),
+        orderId: r.order_id ? String(r.order_id) : undefined,
+        vendorId: String(r.vendor_id),
+        payeeKind: String(r.payee_kind) as VendorSettlement["payeeKind"],
+        status: String(r.status) as VendorSettlement["status"],
+        subtotal: Number(r.subtotal) || 0,
+        netPay: Number(r.net_pay) || 0,
+        issuedAt: String(r.issued_at),
+        dueDate: r.due_date ? String(r.due_date) : undefined,
+        vendorInvoiceNumber: r.vendor_invoice_number
+          ? String(r.vendor_invoice_number)
+          : undefined,
+        vendorInvoiceDate: r.vendor_invoice_date
+          ? String(r.vendor_invoice_date)
+          : undefined,
+        lines,
+        notes,
+        dispute,
+        payments: parseJson<PaymentRecord[]>(r.payments_json),
+        approvedByUserId: r.approved_by_user_id ? String(r.approved_by_user_id) : undefined,
+        approvedAt: r.approved_at ? String(r.approved_at) : undefined,
+        source: r.source ? (String(r.source) as VendorSettlement["source"]) : undefined,
+      };
+    });
+  } catch {
+    /* migration 0016 / 0017 */
   }
 
   return normalizeFullDb(db);
@@ -452,8 +779,27 @@ async function saveToD1(d1: D1Database, db: Db): Promise<void> {
   }
   for (const v of normalized.vendors) {
     await d1
-      .prepare("INSERT INTO vendors (id, name, address, lat, lng, type, temporary) VALUES (?, ?, ?, ?, ?, ?, ?)")
-      .bind(v.id, v.name, v.address, v.lat ?? null, v.lng ?? null, v.type, v.temporary ? 1 : 0)
+      .prepare(
+        `INSERT INTO vendors (id, name, address, lat, lng, type, temporary, contact_name, contact_email,
+         contact_phone, payment_terms_days, tax_id, w9_on_file, w9_file_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        v.id,
+        v.name,
+        v.address,
+        v.lat ?? null,
+        v.lng ?? null,
+        v.type,
+        v.temporary ? 1 : 0,
+        v.contactName ?? null,
+        v.contactEmail ?? null,
+        v.contactPhone ?? null,
+        v.paymentTermsDays ?? null,
+        v.taxId ?? null,
+        v.w9OnFile ? 1 : 0,
+        v.w9FileUrl ?? null
+      )
       .run();
   }
   for (const m of normalized.materials) {
@@ -513,10 +859,11 @@ async function saveToD1(d1: D1Database, db: Db): Promise<void> {
       await d1
         .prepare(
           `INSERT INTO quote_routes (id, quote_id, sort_order, pickup_address, dropoff_address,
-           pickup_vendor_id, haul_rate, haul_cost, haul_qty, haul_unit, haul_miles, haul_rate_per_load,
+           pickup_vendor_id, dropoff_vendor_id, disposal_cost, disposal_rate,
+           haul_rate, haul_cost, haul_qty, haul_unit, haul_miles, haul_rate_per_load,
            material_id, material_name,
            material_type, material_rate, material_cost, material_qty, material_unit, material_lines, taxable)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           r.id,
@@ -525,6 +872,9 @@ async function saveToD1(d1: D1Database, db: Db): Promise<void> {
           r.pickupAddress,
           r.dropoffAddress,
           r.pickupVendorId ?? null,
+          r.dropoffVendorId ?? null,
+          r.disposalCost ?? 0,
+          r.disposalRate ?? 0,
           r.haulRate,
           r.haulCost,
           r.haulQty,
@@ -549,8 +899,9 @@ async function saveToD1(d1: D1Database, db: Db): Promise<void> {
       await d1
         .prepare(
           `INSERT INTO activities (id, type, status, subject, notes, scheduled_at, completed_at,
-           project_id, contractor_id, company, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           project_id, contractor_id, company, customer_invoice_id, carrier_settlement_id,
+           vendor_settlement_id, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           a.id,
@@ -563,6 +914,9 @@ async function saveToD1(d1: D1Database, db: Db): Promise<void> {
           a.projectId ?? null,
           a.contractorId ?? null,
           a.company ?? null,
+          a.customerInvoiceId ?? null,
+          a.carrierSettlementId ?? null,
+          a.vendorSettlementId ?? null,
           a.createdAt,
           a.updatedAt
         )
@@ -640,6 +994,260 @@ async function saveToD1(d1: D1Database, db: Db): Promise<void> {
     }
   } catch {
     /* migration 0011 */
+  }
+
+  try {
+    await d1.prepare("DELETE FROM vendor_settlements").run();
+    await d1.prepare("DELETE FROM carrier_settlements").run();
+    await d1.prepare("DELETE FROM customer_invoices").run();
+    await d1.prepare("DELETE FROM delivery_tickets").run();
+    await d1.prepare("DELETE FROM trips").run();
+    await d1.prepare("DELETE FROM dispatches").run();
+    await d1.prepare("DELETE FROM order_lines").run();
+    await d1.prepare("DELETE FROM orders").run();
+    await d1.prepare("DELETE FROM carriers").run();
+
+    for (const c of normalized.carriers) {
+      await d1
+        .prepare(
+          `INSERT INTO carriers (id, name, contact_name, phone, email, office_id, payment_terms_days,
+           tax_id, w9_on_file, w9_file_url)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          c.id,
+          c.name,
+          c.contactName ?? null,
+          c.phone,
+          c.email,
+          c.officeId ?? null,
+          c.paymentTermsDays ?? null,
+          c.taxId ?? null,
+          c.w9OnFile ? 1 : 0,
+          c.w9FileUrl ?? null
+        )
+        .run();
+    }
+    for (const o of normalized.orders) {
+      await d1
+        .prepare(
+          `INSERT INTO orders (id, number, project_id, quote_id, contractor_id, job_name, tax_rate, status, office_id, created_at,
+           scheduled_at, created_by_user_id, salesperson_id, tax_exempt, tax_exempt_number, history_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          o.id,
+          o.number,
+          o.projectId,
+          o.quoteId,
+          o.contractorId ?? null,
+          o.jobName,
+          o.taxRate,
+          o.status,
+          o.officeId ?? null,
+          o.createdAt,
+          o.scheduledAt ?? null,
+          o.createdByUserId ?? null,
+          o.salespersonId ?? null,
+          o.taxExempt ? 1 : 0,
+          o.taxExemptNumber ?? null,
+          JSON.stringify(o.history ?? [])
+        )
+        .run();
+      for (const line of o.lines) {
+        await d1
+          .prepare(
+            `INSERT INTO order_lines (id, order_id, sort_order, quote_route_id, pickup_address, dropoff_address,
+             pickup_vendor_id, dropoff_vendor_id, material_name, material_buy_rate, material_sell_rate, material_unit, material_qty_quoted, material_lines,
+             disposal_buy_rate, disposal_sell_rate, haul_buy_rate, haul_sell_rate, haul_unit, haul_qty_quoted, taxable)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .bind(
+            line.id,
+            o.id,
+            line.sortOrder,
+            line.quoteRouteId ?? null,
+            line.pickupAddress,
+            line.dropoffAddress,
+            line.pickupVendorId ?? null,
+            line.dropoffVendorId ?? null,
+            line.materialName ?? null,
+            line.materialBuyRate,
+            line.materialSellRate,
+            line.materialUnit ?? "TN",
+            line.materialQtyQuoted,
+            line.materialLines?.length ? JSON.stringify(line.materialLines) : null,
+            line.disposalBuyRate ?? 0,
+            line.disposalSellRate ?? 0,
+            line.haulBuyRate,
+            line.haulSellRate,
+            line.haulUnit ?? "TN",
+            line.haulQtyQuoted,
+            line.taxable ? 1 : 0
+          )
+          .run();
+      }
+    }
+    for (const trip of normalized.trips) {
+      await d1
+        .prepare(
+          `INSERT INTO trips (id, number, order_id, dispatch_id, carrier_id, truck_label, driver_name, status, scheduled_date, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          trip.id,
+          trip.number,
+          trip.orderId,
+          trip.dispatchId,
+          trip.carrierId,
+          trip.truckLabel ?? null,
+          trip.driverName ?? null,
+          trip.status,
+          trip.scheduledDate ?? null,
+          trip.createdAt
+        )
+        .run();
+    }
+    for (const d of normalized.dispatches) {
+      await d1
+        .prepare(
+          `INSERT INTO dispatches (id, order_id, order_line_id, carrier_id, status, assigned_at, notes, trip_id, truck_label, scheduled_date)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          d.id,
+          d.orderId,
+          d.orderLineId,
+          d.carrierId,
+          d.status,
+          d.assignedAt,
+          d.notes ?? null,
+          d.tripId ?? null,
+          d.truckLabel ?? null,
+          d.scheduledDate ?? null
+        )
+        .run();
+    }
+    for (const t of normalized.deliveryTickets) {
+      await d1
+        .prepare(
+          `INSERT INTO delivery_tickets (id, dispatch_id, order_id, order_line_id, line_type, material_line_id,
+           number, ticket_number, trip_id, paper_ticket_number, qty, unit, delivered_at, status, ticket_image_url,
+           rejected_at, approved_by_user_id, driver_sell_rate, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          t.id,
+          t.dispatchId,
+          t.orderId,
+          t.orderLineId,
+          t.lineType,
+          t.materialLineId ?? null,
+          t.number ?? null,
+          t.ticketNumber ?? t.paperTicketNumber ?? null,
+          t.tripId ?? null,
+          t.paperTicketNumber ?? t.ticketNumber ?? null,
+          t.qty,
+          t.unit,
+          t.deliveredAt,
+          t.status,
+          t.ticketImageUrl ?? null,
+          t.rejectedAt ?? null,
+          t.approvedByUserId ?? null,
+          t.driverSellRate ?? null,
+          t.notes ?? null
+        )
+        .run();
+    }
+    for (const inv of normalized.customerInvoices) {
+      await d1
+        .prepare(
+          `INSERT INTO customer_invoices (id, number, order_id, project_id, contractor_id, status,
+           subtotal, tax, total, issued_at, due_date, lines_json, notes_json, payments_json,
+           sent_by_user_id, sent_at, attachment_url, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          inv.id,
+          inv.number,
+          inv.orderId ?? null,
+          inv.projectId ?? null,
+          inv.contractorId ?? null,
+          inv.status,
+          inv.subtotal,
+          inv.tax,
+          inv.total,
+          inv.issuedAt,
+          inv.dueDate ?? null,
+          JSON.stringify(inv.lines),
+          inv.notes?.length ? JSON.stringify(inv.notes) : null,
+          inv.payments?.length ? JSON.stringify(inv.payments) : null,
+          inv.sentByUserId ?? null,
+          inv.sentAt ?? null,
+          inv.attachmentUrl ?? null,
+          inv.source ?? "ticket"
+        )
+        .run();
+    }
+    for (const s of normalized.carrierSettlements) {
+      await d1
+        .prepare(
+          `INSERT INTO carrier_settlements (id, number, order_id, carrier_id, status, subtotal, broker_fee, net_pay,
+           issued_at, lines_json, notes_json, due_date, payments_json, approved_by_user_id, approved_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          s.id,
+          s.number,
+          s.orderId,
+          s.carrierId,
+          s.status,
+          s.subtotal,
+          s.brokerFee,
+          s.netPay,
+          s.issuedAt,
+          JSON.stringify(s.lines),
+          s.notes?.length ? JSON.stringify(s.notes) : null,
+          s.dueDate ?? null,
+          s.payments?.length ? JSON.stringify(s.payments) : null,
+          s.approvedByUserId ?? null,
+          s.approvedAt ?? null
+        )
+        .run();
+    }
+    for (const s of normalized.vendorSettlements) {
+      await d1
+        .prepare(
+          `INSERT INTO vendor_settlements (id, number, order_id, vendor_id, payee_kind, status, subtotal, net_pay,
+           issued_at, lines_json, notes_json, dispute_json, due_date, vendor_invoice_number, vendor_invoice_date,
+           payments_json, approved_by_user_id, approved_at, source)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          s.id,
+          s.number,
+          s.orderId ?? null,
+          s.vendorId,
+          s.payeeKind,
+          s.status,
+          s.subtotal,
+          s.netPay,
+          s.issuedAt,
+          JSON.stringify(s.lines),
+          s.notes?.length ? JSON.stringify(s.notes) : null,
+          s.dispute ? JSON.stringify(s.dispute) : null,
+          s.dueDate ?? null,
+          s.vendorInvoiceNumber ?? null,
+          s.vendorInvoiceDate ?? null,
+          s.payments?.length ? JSON.stringify(s.payments) : null,
+          s.approvedByUserId ?? null,
+          s.approvedAt ?? null,
+          s.source ?? "ticket"
+        )
+        .run();
+    }
+  } catch {
+    /* migration 0016 / 0017 */
   }
 
   await saveMeta(d1, normalized.meta);

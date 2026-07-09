@@ -1,4 +1,4 @@
-import { Db, Quote, QuoteHistoryEvent, QuoteRoute } from "./types";
+import { Db, Quote, QuoteHistoryEvent, QuoteRoute, QuoteSendRecipient } from "./types";
 import { generateId } from "./utils";
 import { generateQuoteNumber } from "./storage";
 
@@ -54,15 +54,41 @@ export function duplicateQuote(db: Db, quoteId: string): { db: Db; newQuoteId: s
 }
 
 export function sendQuote(db: Db, quoteId: string): Db | null {
+  return sendQuoteWithRecipients(db, quoteId, []);
+}
+
+export function sendQuoteWithRecipients(
+  db: Db,
+  quoteId: string,
+  recipients: QuoteSendRecipient[],
+  message?: string
+): Db | null {
   const quote = db.quotes.find((q) => q.id === quoteId);
   if (!quote) return null;
 
   const now = new Date().toISOString();
+  const notePayload: { recipients: QuoteSendRecipient[]; message?: string } = {
+    recipients,
+  };
+  if (message?.trim()) notePayload.message = message.trim();
+
   const event: QuoteHistoryEvent = {
     id: generateId(),
     type: "sent",
     at: now,
+    note: JSON.stringify(notePayload),
   };
+
+  const primary = recipients[0];
+  const contractorName =
+    primary?.name?.trim() ||
+    quote.contractorName ||
+    (primary?.contactId
+      ? (() => {
+          const c = db.contractors.find((x) => x.id === primary.contactId);
+          return c ? `${c.firstName} ${c.lastName}`.trim() : undefined;
+        })()
+      : undefined);
 
   return {
     ...db,
@@ -72,11 +98,22 @@ export function sendQuote(db: Db, quoteId: string): Db | null {
             ...q,
             status: "sent",
             sentAt: now,
+            contractorName: contractorName || q.contractorName,
             history: [...(q.history ?? []), event],
           }
         : q
     ),
   };
+}
+
+export function parseSentRecipients(note?: string): QuoteSendRecipient[] {
+  if (!note) return [];
+  try {
+    const parsed = JSON.parse(note) as { recipients?: QuoteSendRecipient[] };
+    return parsed.recipients ?? [];
+  } catch {
+    return [];
+  }
 }
 
 export function appendQuoteHistory(

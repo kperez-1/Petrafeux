@@ -12,7 +12,7 @@ Petrafi is an internal sales and CRM tool for a construction-material hauling bu
 
 - **Purpose:** Manage construction-material hauling sales end to end — projects, multi-contractor bidding, quotes (haul plus material pricing), vendors and quarries, a contractor CRM, and bid-email intake from Outlook `.msg` files.
 - **Stack:** Next.js 16 (runs on port 3002), React 19, Tailwind CSS with shadcn UI components, Leaflet for maps, and optional Cloudflare D1 persistence via OpenNext.
-- **Current maturity:** Functional internal tool. Most modules are complete; the **Orders** tab on the project detail page is a placeholder, and authentication is a simple user picker rather than a real login.
+- **Current maturity:** Functional internal tool with sales/CRM plus a **developer prototype** for orders, dispatch, delivery tickets, and dual-sided billing (AR/AP). Authentication is still a simple user picker rather than a real login.
 
 ### How to run
 
@@ -39,41 +39,57 @@ There is no password login today. The "current user" is selected in Settings and
 
 ## 3. Information architecture
 
-The sidebar groups pages into Sales and Master Data, with Settings in the footer.
+The sidebar matches staging Petrafi: **Home**, **Sales**, **Operations**, **Resources**, and **Billing**, with Settings in the footer.
 
 ```mermaid
 flowchart TB
+  Home["/home"]
   subgraph sales [Sales]
     ProjectsDashboard["/projects/dashboard"]
-    ProjectsList["/projects/list"]
-    ProjectDetail["/projects/[id]"]
     Quotes["/quotes"]
-    QuoteDetail["/quotes/[id]"]
-    QuoteEdit["/quotes/[id]/edit"]
+    Orders["/orders"]
     Activities["/activities"]
   end
-  subgraph master [Master Data]
+  subgraph ops [Operations]
+    Dispatch["/dispatch"]
+    Tickets["/tickets"]
+    Trips["/trips"]
+  end
+  subgraph resources [Resources]
     Contractors["/contractors"]
-    CompanyDetail["/contractors/[slug]"]
     Vendors["/vendors"]
     Materials["/materials"]
+    Carriers["/carriers"]
     HaulRates["/haul-rates"]
     VendorMap["/vendor-map"]
   end
-  Settings["/settings"]
-  ProjectsDashboard --> ProjectDetail
-  ProjectsList --> ProjectDetail
-  ProjectDetail --> QuoteEdit
-  Quotes --> QuoteDetail
-  QuoteDetail --> QuoteEdit
-  Contractors --> CompanyDetail
+  subgraph billing [Billing]
+    AR["/billing/invoices AR"]
+    AP["/billing/ap"]
+  end
+  Home --> Orders
+  Home --> Dispatch
+  Home --> Tickets
+  Orders --> OrderDetail["/orders/[id]"]
+  Tickets --> TicketDetail["/tickets/[id]"]
 ```
 
 ### Route reference
 
 | Route | Purpose | Key file |
 |-------|---------|----------|
-| `/` | Redirects to `/projects` | [`src/app/page.tsx`](../src/app/page.tsx) |
+| `/` | Redirects to `/home` | [`src/app/page.tsx`](../src/app/page.tsx) |
+| `/home` | Card grid: Sales, Operations, Resources, Billing | [`src/app/home/page.tsx`](../src/app/home/page.tsx) |
+| `/orders` | Global order list; create from approved quote | [`src/app/orders/page.tsx`](../src/app/orders/page.tsx) |
+| `/orders/[id]` | Order detail: contractor, job info, routes, trip history, billing summary | [`src/app/orders/[id]/page.tsx`](../src/app/orders/[id]/page.tsx) |
+| `/dispatch` | Two-column dispatch board: orders + carriers/fleet | [`src/app/dispatch/page.tsx`](../src/app/dispatch/page.tsx) |
+| `/tickets` | Tickets inbox: pending orders + tickets grouped by trip | [`src/app/tickets/page.tsx`](../src/app/tickets/page.tsx) |
+| `/tickets/[id]` | Ticket review: Save & Approve triggers auto draft billing | [`src/app/tickets/[id]/page.tsx`](../src/app/tickets/[id]/page.tsx) |
+| `/trips` | Trips browse stub (trips visible on order + inbox) | [`src/app/trips/page.tsx`](../src/app/trips/page.tsx) |
+| `/billing/invoices` | **Accounts Receivable** — open/paid/all tabs, KPIs, `?company=` filter | [`src/app/billing/invoices/page.tsx`](../src/app/billing/invoices/page.tsx) |
+| `/billing/ap` | **Accounts Payable** — All/Carriers/Vendors tabs, open/paid/all, `?vendorId=` / `?carrierId=` | [`src/app/billing/ap/page.tsx`](../src/app/billing/ap/page.tsx) |
+| `/billing/settlements` | Redirects to `/billing/ap?tab=carriers` | [`src/app/billing/settlements/page.tsx`](../src/app/billing/settlements/page.tsx) |
+| `/billing/vendor-payables` | Redirects to `/billing/ap?tab=vendors` | [`src/app/billing/vendor-payables/page.tsx`](../src/app/billing/vendor-payables/page.tsx) |
 | `/projects` | Redirects to dashboard | [`src/app/projects/page.tsx`](../src/app/projects/page.tsx) |
 | `/projects/dashboard` | CRM Kanban board: stages, drag-and-drop, filters, archived view, email `.msg` drop, new project | [`src/app/projects/dashboard/page.tsx`](../src/app/projects/dashboard/page.tsx) |
 | `/projects/list` | Table of all projects with stage labels | [`src/app/projects/list/page.tsx`](../src/app/projects/list/page.tsx) |
@@ -220,6 +236,44 @@ erDiagram
 - **User actions:** Set the current user, org name/code, and quote defaults; load ATPB quarries, contractors, and haul rates from server-side imports.
 - **Behavior:** Import scripts write to the server JSON file; Settings buttons hydrate the local database in local mode.
 
+### 6.8 Billing (prototype)
+
+This repo implements a **thin ops + billing layer** for developers. Production dispatch, GPS, and ticket OCR live in the separate [sales-proposal-building-tool](https://github.com/Petrafi-Inc/sales-proposal-building-tool) repository — reference only; do not push changes there.
+
+**End-to-end flow:** Approved quote → Order (lines snapshot quote routes) → Dispatch to carrier (creates trip) → Delivery ticket (actual qty) → **Save & Approve** in Tickets Inbox → draft customer invoice (AR) + carrier settlement (AP) + vendor payable (AP) created automatically.
+
+| Step | User action | Rules |
+|------|-------------|-------|
+| Order | Create from approved quote on `/orders` | One order per quote; status `pending` → `active` → `completed` |
+| Dispatch | Assign carrier/truck on `/dispatch` | Creates `Trip` (TRP…) linked to dispatch |
+| Ticket | Record qty; review in `/tickets/[id]` | **Save & Approve** runs [`billing-on-approve.ts`](../src/lib/billing-on-approve.ts) — no confirmation modal |
+| AR invoice | Auto on approve | Appends line to existing draft invoice for order or creates new draft |
+| AP — carriers | Auto on approve (haul tickets) | Draft carrier settlement per carrier |
+| AP — vendors | Auto on approve (material/disposal) | Draft vendor payable per vendor + payee kind |
+
+**Pages:** `/home`, `/orders`, `/orders/[id]`, `/dispatch`, `/tickets`, `/tickets/[id]`, `/carriers`, `/billing/invoices` (AR), `/billing/ap` (AP).
+
+**AR/AP ledger:** Contractor company pages show an AR balance card linking to `/billing/invoices?bucket=open&company={slug}`. Vendor detail pages show AP balance linking to `/billing/ap?bucket=open&tab=vendors&vendorId={id}`.
+
+**Follow-up & notes:** AR invoice and AP payable detail pages include **Activities** (linked via `customerInvoiceId`, `carrierSettlementId`, or `vendorSettlementId`) and append-only **Notes** on each document. Vendor payables can be **disputed** (`status: disputed`) with reason and expected correct rate/amount; payment is blocked until the dispute is resolved.
+
+**AR/AP accounting (prototype Phase 1–2):**
+
+| Capability | Behavior |
+|------------|----------|
+| Payee master | Vendors and carriers store contact, `paymentTermsDays`, `taxId`, and W-9 on file; editable on vendor/carrier forms |
+| AP due dates | `dueDate` on settlements, computed from payee terms on approve (default Net 30) |
+| Overdue & aging | 30/60/90 buckets on AR and AP ledgers; overdue filter chips |
+| Payment recording | **Record payment** (check/ACH + reference) replaces bare Mark paid; `payments[]` on document |
+| Manual vendor bill | Enter vendor invoice #, date, amount on AP; duplicate warning per vendor + invoice # |
+| Manual AR invoice | Non-ticket charges (mobilization, standby) with optional PDF attachment URL |
+| Approver | `approvedByUserId` / `approvedAt` on AP approve; `sentByUserId` on AR mark sent |
+| 3-way match | Read-only panel on AP detail: order qty/rate vs ticket qty vs billed line |
+
+**Deferred (production targets):** Multi-level approval by dollar threshold, wire/card payments, recurring payments, 1099 reporting, vendor portal. See [`docs/BILLING_INTEGRATION.md`](BILLING_INTEGRATION.md).
+
+**Out of scope (v1):** Real GPS, ticket OCR/image storage (optional URL only), live bank/ACH integration, QuickBooks export, live invoice email (stub at `POST /api/invoices/send`). See [`docs/BILLING_INTEGRATION.md`](BILLING_INTEGRATION.md) for the production integration contract.
+
 ---
 
 ## 7. Workflow diagrams
@@ -336,6 +390,7 @@ flowchart LR
 | POST | `/api/email-intake/apply` | Commit the intake to the database and promote attachments to disk |
 | GET | `/api/email-intake/attachments/[id]` | Stream attachment bytes |
 | GET | `/api/geocode` | Address to lat/lng (Nominatim with US Census fallback) |
+| POST | `/api/invoices/send` | Stub: simulate sending a customer invoice PDF |
 
 All email-intake routes run with `runtime = "nodejs"` because they touch the filesystem. Server persistence is centralized in [`src/lib/server-db.ts`](../src/lib/server-db.ts) (`loadServerDb` / `saveServerDb`).
 
@@ -347,10 +402,10 @@ All email-intake routes run with `runtime = "nodejs"` because they touch the fil
 |-------|------|----------|
 | localStorage | Default dev mode (`NEXT_PUBLIC_CRM_REMOTE` unset or false) | Key `petrafi_db_v1` ([`src/lib/storage.ts`](../src/lib/storage.ts)) |
 | Server JSON file | `npm run dev` with the API, and all import scripts | `.data/petrafi-db.json` |
-| Cloudflare D1 | `preview:cloudflare` or `deploy` with a `DB` binding | Migrations `migrations/0001_init.sql` through `migrations/0011_project_bidders.sql` |
+| Cloudflare D1 | `preview:cloudflare` or `deploy` with a `DB` binding | Migrations `migrations/0001_init.sql` through `migrations/0016_orders_ops_billing.sql` |
 | Email files | Parse/apply only | `.data/email-attachments/` and `.data/email-intake-sessions/` ([`src/lib/email-attachment-storage.ts`](../src/lib/email-attachment-storage.ts)) |
 
-**Migrations of note:** `0009_email_intake.sql`, `0010_project_intake_fields.sql`, and `0011_project_bidders.sql` cover the newest features.
+**Migrations of note:** `0009_email_intake.sql`, `0010_project_intake_fields.sql`, `0011_project_bidders.sql`, and `0016_orders_ops_billing.sql` (carriers, orders, dispatches, tickets, invoices, settlements).
 
 **npm scripts** ([`package.json`](../package.json)):
 
@@ -384,7 +439,7 @@ Reuse these shared components for consistency:
 
 ## 11. Known limitations and out of scope (v1)
 
-- The **Orders** tab on project detail is a placeholder ("Orders coming soon").
+- Billing is a **prototype** aligned conceptually with production ops; field ops, GPS, and OCR are not implemented here.
 - Email intake supports `.msg` only; `.eml` is not handled yet.
 - There is no auto-apply for email intake — the review sheet is always required.
 - There is no LLM-based parsing.
@@ -396,7 +451,6 @@ Reuse these shared components for consistency:
 
 ## 12. Suggested roadmap
 
-- Build out the Orders module behind the existing tab.
 - Add `.eml` intake alongside `.msg`.
 - Unify the remote migration script so it always includes the newest migrations.
 - Consider syncing localStorage and the server file so email metadata is consistent in local mode.

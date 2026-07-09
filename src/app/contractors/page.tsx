@@ -12,6 +12,7 @@ import {
   Pencil,
 } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
+import { useActiveOffice } from "@/components/ActiveOfficeProvider";
 import { generateId } from "@/lib/utils";
 import { Contractor } from "@/lib/types";
 import { buildCompanySummaries, getContactsForCompany } from "@/lib/contractors";
@@ -57,8 +58,8 @@ const DEFAULT_VISIBLE = new Set(
 export default function ContractorsPage() {
   const { db, save } = useDb();
   const [search, setSearch] = useState("");
-  const [officeFilter, setOfficeFilter] = useState("");
   const [open, setOpen] = useState(false);
+  const { officeId } = useActiveOffice();
   const [form, setForm] = useState(EMPTY);
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnId>>(
     () => new Set(DEFAULT_VISIBLE)
@@ -75,15 +76,13 @@ export default function ContractorsPage() {
   const filtered = useMemo(
     () =>
       companies.filter((co) => {
-        if (officeFilter) {
-          const contacts = getContactsForCompany(db, co.name);
-          if (!contacts.some((c) => c.officeId === officeFilter)) return false;
-        }
+        const contacts = getContactsForCompany(db, co.name);
+        if (!contacts.some((c) => c.officeId === officeId)) return false;
         return `${co.name} ${co.address} ${co.phone} ${co.email}`
           .toLowerCase()
           .includes(search.toLowerCase());
       }),
-    [companies, search, officeFilter, db]
+    [companies, search, officeId, db]
   );
 
   useEffect(() => {
@@ -168,18 +167,6 @@ export default function ContractorsPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <select
-          className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm"
-          value={officeFilter}
-          onChange={(e) => setOfficeFilter(e.target.value)}
-        >
-          <option value="">All offices</option>
-          {db.offices.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.code}
-            </option>
-          ))}
-        </select>
         <div className="relative" ref={columnsRef}>
           <Button
             variant="outline"

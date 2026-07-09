@@ -21,6 +21,13 @@ const EMPTY = {
   address: "",
   type: "quarry" as Vendor["type"],
   temporary: false,
+  contactName: "",
+  contactEmail: "",
+  contactPhone: "",
+  paymentTermsDays: "30",
+  taxId: "",
+  w9OnFile: false,
+  w9FileUrl: "",
 };
 
 const EMPTY_MATERIAL = {
@@ -60,6 +67,13 @@ export function VendorFormSheet({
         address: vendor.address,
         type: vendor.type,
         temporary: vendor.temporary ?? false,
+        contactName: vendor.contactName ?? "",
+        contactEmail: vendor.contactEmail ?? "",
+        contactPhone: vendor.contactPhone ?? "",
+        paymentTermsDays: String(vendor.paymentTermsDays ?? 30),
+        taxId: vendor.taxId ?? "",
+        w9OnFile: vendor.w9OnFile ?? false,
+        w9FileUrl: vendor.w9FileUrl ?? "",
       });
     } else {
       setForm(EMPTY);
@@ -116,6 +130,13 @@ export function VendorFormSheet({
         lng,
         mapCoordsApproximate,
         temporary: form.temporary || undefined,
+        contactName: form.contactName.trim() || undefined,
+        contactEmail: form.contactEmail.trim() || undefined,
+        contactPhone: form.contactPhone.trim() || undefined,
+        paymentTermsDays: parseInt(form.paymentTermsDays, 10) || 30,
+        taxId: form.taxId.trim() || undefined,
+        w9OnFile: form.w9OnFile || undefined,
+        w9FileUrl: form.w9FileUrl.trim() || undefined,
       };
 
       const vendors = vendor
@@ -220,6 +241,64 @@ export function VendorFormSheet({
             </span>
           </span>
         </label>
+      </FormSection>
+
+      <FormSection title="AP profile" description="Payment and tax info for accounts payable">
+        <FormField label="Contact name">
+          <Input
+            className="h-11"
+            value={form.contactName}
+            onChange={(e) => setForm({ ...form, contactName: e.target.value })}
+          />
+        </FormField>
+        <FormField label="Contact email">
+          <Input
+            type="email"
+            className="h-11"
+            value={form.contactEmail}
+            onChange={(e) => setForm({ ...form, contactEmail: e.target.value })}
+          />
+        </FormField>
+        <FormField label="Contact phone">
+          <Input
+            className="h-11"
+            value={form.contactPhone}
+            onChange={(e) => setForm({ ...form, contactPhone: e.target.value })}
+          />
+        </FormField>
+        <FormField label="Payment terms (days)">
+          <Input
+            type="number"
+            min="0"
+            className="h-11"
+            value={form.paymentTermsDays}
+            onChange={(e) => setForm({ ...form, paymentTermsDays: e.target.value })}
+          />
+        </FormField>
+        <FormField label="Tax ID (EIN)">
+          <Input
+            className="h-11"
+            value={form.taxId}
+            onChange={(e) => setForm({ ...form, taxId: e.target.value })}
+          />
+        </FormField>
+        <label className="flex items-center gap-2.5 rounded-md border border-gray-200 px-3 py-2.5">
+          <input
+            type="checkbox"
+            checked={form.w9OnFile}
+            onChange={(e) => setForm({ ...form, w9OnFile: e.target.checked })}
+            className="h-4 w-4 accent-[#0f6b4f]"
+          />
+          <span className="text-sm text-gray-700">W-9 on file</span>
+        </label>
+        <FormField label="W-9 file URL (stub)">
+          <Input
+            className="h-11"
+            value={form.w9FileUrl}
+            onChange={(e) => setForm({ ...form, w9FileUrl: e.target.value })}
+            placeholder="https://…"
+          />
+        </FormField>
       </FormSection>
 
       {!isEdit && (

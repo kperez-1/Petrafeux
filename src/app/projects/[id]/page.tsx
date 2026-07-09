@@ -18,6 +18,9 @@ import { ProjectFormSheet } from "@/components/projects/ProjectFormSheet";
 import { getActivitiesForProject } from "@/lib/activities";
 import { ProjectEmailTab } from "@/components/projects/ProjectEmailTab";
 import { ProjectBiddersPanel } from "@/components/projects/ProjectBiddersPanel";
+import { QuotePdfButton } from "@/components/quotes/QuotePdfButton";
+import { ordersForProject } from "@/lib/orders";
+import { orderStatusLabel } from "@/lib/order-status";
 
 const STATUS_STYLES: Record<string, string> = {
   sent: "bg-yellow-100 text-yellow-800 border-yellow-200",
@@ -39,7 +42,12 @@ function ProjectDetailPageContent({ params }: { params: Promise<{ id: string }> 
   const { db, save } = useDb();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const defaultTab = searchParams.get("tab") === "email" ? "email" : "quotes";
+  const defaultTab =
+    searchParams.get("tab") === "email"
+      ? "email"
+      : searchParams.get("tab") === "orders"
+        ? "orders"
+        : "quotes";
   const [creatingQuote, setCreatingQuote] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
 
@@ -76,6 +84,10 @@ function ProjectDetailPageContent({ params }: { params: Promise<{ id: string }> 
   // project is used in createQuote — must be declared before hooks
   const project = db.projects.find((p) => p.id === id);
   const quotes = db.quotes.filter((q) => q.projectId === id);
+  const orders = ordersForProject(db, id);
+  const approvedQuotesWithoutOrder = quotes.filter(
+    (q) => q.status === "approved" && !orders.some((o) => o.quoteId === q.id)
+  );
 
   if (!project) {
     return (
@@ -248,12 +260,13 @@ function ProjectDetailPageContent({ params }: { params: Promise<{ id: string }> 
                   <th className="px-4 py-3 text-left font-medium">Total</th>
                   <th className="px-4 py-3 text-left font-medium">Status</th>
                   <th className="px-4 py-3 text-left font-medium">Created</th>
+                  <th className="px-4 py-3 text-left font-medium">PDF</th>
                 </tr>
               </thead>
               <tbody>
                 {quotes.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                       No quotes yet — create one above.
                     </td>
                   </tr>
@@ -280,6 +293,9 @@ function ProjectDetailPageContent({ params }: { params: Promise<{ id: string }> 
                         </span>
                       </td>
                       <td className="px-4 py-3 text-gray-500">{formatDate(quote.createdAt)}</td>
+                      <td className="px-4 py-3">
+                        <QuotePdfButton quote={quote} />
+                      </td>
                     </tr>
                   );
                 })}
@@ -302,8 +318,61 @@ function ProjectDetailPageContent({ params }: { params: Promise<{ id: string }> 
         )}
 
         <TabsContent value="orders">
-          <div className="rounded-xl border border-gray-200 bg-white p-8 text-center text-gray-400">
-            Orders coming soon.
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-base font-semibold text-gray-900">Orders</h2>
+            <Link href="/orders">
+              <Button size="sm" variant="outline" className="gap-1">
+                Create from quote on Orders
+              </Button>
+            </Link>
+          </div>
+
+          <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
+                  <th className="px-4 py-3 text-left font-medium">No.</th>
+                  <th className="px-4 py-3 text-left font-medium">Job</th>
+                  <th className="px-4 py-3 text-left font-medium">Quote</th>
+                  <th className="px-4 py-3 text-left font-medium">Status</th>
+                  <th className="px-4 py-3 text-left font-medium">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
+                      {approvedQuotesWithoutOrder.length > 0
+                        ? "Create orders from approved quotes on the Orders page."
+                        : "Approve a quote first, then create an order on the Orders page."}
+                    </td>
+                  </tr>
+                )}
+                {orders.map((order) => {
+                  const linkedQuote = db.quotes.find((q) => q.id === order.quoteId);
+                  return (
+                    <tr key={order.id} className="border-b border-gray-100 hover:bg-gray-50">
+                      <td className="px-4 py-3">
+                        <Link
+                          href={`/orders/${order.id}`}
+                          className="font-mono text-xs text-gray-500 hover:text-[#0f6b4f]"
+                        >
+                          {order.number}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3 font-medium">
+                        <Link href={`/orders/${order.id}`} className="hover:text-[#0f6b4f]">
+                          {order.jobName}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">{linkedQuote?.number ?? "—"}</td>
+                      <td className="px-4 py-3">{orderStatusLabel(order.status)}</td>
+                      <td className="px-4 py-3 text-gray-500">{formatDate(order.createdAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         </TabsContent>
       </Tabs>

@@ -1,6 +1,6 @@
 "use client";
 
-import { use } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -21,12 +21,14 @@ import {
   netHaulBuyRate,
   allInUnitRate,
 } from "@/lib/quote-calc";
-import { duplicateQuote, sendQuote, appendQuoteHistory } from "@/lib/quote-actions";
+import { duplicateQuote, appendQuoteHistory, parseSentRecipients } from "@/lib/quote-actions";
 import { getRouteMaterials } from "@/lib/route-materials";
 import { ActivitiesPanel } from "@/components/activities/ActivitiesPanel";
 import { getActivitiesForQuote } from "@/lib/activities";
 import { Quote, QuoteHistoryEvent, normalizeMaterialUnit, unitRateLabel } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { QuotePdfButton } from "@/components/quotes/QuotePdfButton";
+import { QuoteSendSheet } from "@/components/quotes/QuoteSendSheet";
 
 const STATUS_STYLES: Record<string, string> = {
   sent: "bg-yellow-100 text-yellow-800 border-yellow-200",
@@ -47,6 +49,7 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
   const { id } = use(params);
   const { db, save } = useDb();
   const router = useRouter();
+  const [sendOpen, setSendOpen] = useState(false);
 
   const quote = db.quotes.find((q) => q.id === id);
   const project = quote ? db.projects.find((p) => p.id === quote.projectId) : null;
@@ -83,11 +86,6 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
       ...db,
       quotes: db.quotes.map((q) => (q.id === id ? next : q)),
     });
-  }
-
-  async function handleSend() {
-    const nextDb = sendQuote(db, id);
-    if (nextDb) await save(nextDb);
   }
 
   async function handleDuplicate() {
@@ -140,14 +138,14 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
             >
               <Pencil className="h-4 w-4" /> Edit Quote
             </Button>
+            <QuotePdfButton quote={currentQuote} />
             <Button
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={handleSend}
-              disabled={currentQuote.status === "sent"}
+              onClick={() => setSendOpen(true)}
             >
-              <Send className="h-4 w-4" /> Send
+              <Send className="h-4 w-4" /> {currentQuote.status === "sent" ? "Send again" : "Send"}
             </Button>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={handleDuplicate}>
               <Copy className="h-4 w-4" /> Duplicate
@@ -304,18 +302,32 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
         <div className="mt-6 rounded-xl border border-gray-200 bg-white p-6">
           <h2 className="mb-3 text-base font-semibold text-gray-900">History</h2>
           <div className="space-y-2 text-sm text-gray-500">
-            {quoteHistory.map((event) => (
-              <div key={event.id} className="flex items-start gap-2">
-                <Clock className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                <span>
-                  {HISTORY_LABELS[event.type]}
-                  {event.note ? ` — ${event.note}` : ""} · {formatDate(event.at)}
-                </span>
-              </div>
-            ))}
+            {quoteHistory.map((event) => {
+              const sentTo =
+                event.type === "sent" ? parseSentRecipients(event.note) : [];
+              const noteText =
+                event.type === "sent" && sentTo.length
+                  ? ` — Sent to ${sentTo.map((r) => r.email).join(", ")}`
+                  : event.note && event.type !== "sent"
+                    ? ` — ${event.note}`
+                    : event.type === "duplicated_from" && event.note
+                      ? ` — ${event.note}`
+                      : "";
+              return (
+                <div key={event.id} className="flex items-start gap-2">
+                  <Clock className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                  <span>
+                    {HISTORY_LABELS[event.type]}
+                    {noteText} · {formatDate(event.at)}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
+
+      <QuoteSendSheet quote={currentQuote} open={sendOpen} onOpenChange={setSendOpen} />
 
       <div className="w-[280px] shrink-0 border-l border-gray-200 bg-white p-6 overflow-y-auto">
         <h2 className="mb-4 text-base font-semibold text-gray-900">Summary</h2>

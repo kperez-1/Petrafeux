@@ -20,6 +20,7 @@ import {
 } from "@/components/layout";
 import { Input } from "@/components/ui/input";
 import { ProjectPickerField } from "@/components/projects/ProjectPickerField";
+import { QuotePdfButton } from "@/components/quotes/QuotePdfButton";
 
 const STATUS_STYLES: Record<string, string> = {
   sent: "bg-yellow-100 text-yellow-800 border-yellow-200",
@@ -119,12 +120,13 @@ export default function QuotesPage() {
               <th className="px-4 py-3 text-left font-medium">Total</th>
               <th className="px-4 py-3 text-left font-medium">Status</th>
               <th className="px-4 py-3 text-left font-medium">Created</th>
+              <th className="px-4 py-3 text-left font-medium">PDF</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
                   No quotes yet — create one above.
                 </td>
               </tr>
@@ -166,6 +168,9 @@ export default function QuotesPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-500">{formatDate(quote.createdAt)}</td>
+                  <td className="px-4 py-3">
+                    <QuotePdfButton quote={quote} />
+                  </td>
                 </tr>
               );
             })}
