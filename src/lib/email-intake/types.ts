@@ -18,6 +18,8 @@ export interface ParsedProjectFields {
   address: string;
   dueDate?: string;
   descriptionSnippet?: string;
+  /** City/region hint from subject or attachment filename when full street is unknown */
+  addressHint?: string;
 }
 
 export interface ParsedEmailIntake {

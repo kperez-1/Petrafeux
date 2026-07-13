@@ -1,6 +1,7 @@
 import { Db, VendorSettlementLine, CarrierSettlementLine } from "./types";
 import { getOrder } from "./orders";
 import { getTicketById } from "./billing-ledger";
+import { resolveMaterialBuyRate } from "./route-materials";
 
 export interface ThreeWayMatchRow {
   lineId: string;
@@ -70,7 +71,9 @@ export function threeWayMatchForVendorLines(
     const orderLine = orderLineForSettlementLine(db, line.orderLineId);
     const ticket = getTicketById(db, line.deliveryTicketId);
     const orderQty = orderLine?.materialQtyQuoted;
-    const orderRate = orderLine?.materialBuyRate;
+    const orderRate = orderLine
+      ? resolveMaterialBuyRate(orderLine, ticket?.materialLineId)
+      : undefined;
     const ticketQty = ticket?.qty;
     const qtyDelta =
       ticketQty != null ? Math.round((line.qty - ticketQty) * 100) / 100 : undefined;

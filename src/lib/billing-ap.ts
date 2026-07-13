@@ -11,6 +11,8 @@ import { getOrder } from "./orders";
 import { getBrokerFeePercent } from "./db-defaults";
 import { netHaulBuyRate } from "./margin-calc";
 import { normalizeMaterialUnit } from "./types";
+import { actsAsHaulTicket } from "./delivery-ticket-billing";
+import { resolveMaterialBuyRate } from "./route-materials";
 
 function findOrderLine(db: Db, orderLineId: string): OrderLine | undefined {
   for (const order of db.orders) {
@@ -21,17 +23,13 @@ function findOrderLine(db: Db, orderLineId: string): OrderLine | undefined {
 }
 
 function buyRateForTicket(line: OrderLine, ticket: DeliveryTicket): number {
-  if (ticket.lineType === "haul") return line.haulBuyRate;
-  if (ticket.materialLineId && line.materialLines) {
-    const mat = line.materialLines.find((m) => m.id === ticket.materialLineId);
-    if (mat) return mat.materialCost;
-  }
-  return line.materialBuyRate;
+  if (actsAsHaulTicket(ticket)) return line.haulBuyRate;
+  return resolveMaterialBuyRate(line, ticket.materialLineId);
 }
 
 function ticketDescription(ticket: DeliveryTicket, line: OrderLine): string {
   const route = [line.pickupAddress, line.dropoffAddress].filter(Boolean).join(" → ");
-  if (ticket.lineType === "haul") {
+  if (actsAsHaulTicket(ticket)) {
     return `Haul pay${route ? ` — ${route}` : ""}`;
   }
   let matName = line.materialName || "Material buy";
@@ -51,16 +49,16 @@ export function buildSettlementLine(
   if (!line) return null;
 
   const buyRate = buyRateForTicket(line, ticket);
-  if (ticket.lineType !== "haul") return null;
+  if (!actsAsHaulTicket(ticket)) return null;
   if (buyRate <= 0) return null;
 
   const grossAmount = Math.round(buyRate * ticket.qty * 100) / 100;
   const brokerFee =
-    ticket.lineType === "haul"
+    actsAsHaulTicket(ticket)
       ? Math.round(grossAmount * (brokerFeePercent / 100) * 100) / 100
       : 0;
   const netPay =
-    ticket.lineType === "haul"
+    actsAsHaulTicket(ticket)
       ? Math.round(netHaulBuyRate(buyRate, brokerFeePercent) * ticket.qty * 100) / 100
       : grossAmount;
 
@@ -102,7 +100,7 @@ export function buildCarrierSettlementFromTickets(
   }
 
   for (const ticket of tickets) {
-    if (ticket.lineType !== "haul") {
+    if (!actsAsHaulTicket(ticket)) {
       throw new Error("Carrier settlements only include haul tickets");
     }
     const dispatch = db.dispatches.find((d) => d.id === ticket.dispatchId);
@@ -113,7 +111,7 @@ export function buildCarrierSettlementFromTickets(
 
   const lines: CarrierSettlementLine[] = [];
   for (const ticket of tickets) {
-    if (ticket.lineType !== "haul") continue;
+    if (!actsAsHaulTicket(ticket)) continue;
     const line = buildSettlementLine(db, ticket, brokerFeePercent);
     if (line) lines.push(line);
   }
@@ -195,7 +193,7 @@ export function appendTicketToDraftCarrierSettlement(
   db: Db,
   ticket: DeliveryTicket
 ): { db: Db; settlement?: CarrierSettlement } {
-  if (ticket.lineType !== "haul" || ticket.status !== "approved") return { db };
+  if (ticket.status !== "approved" || !actsAsHaulTicket(ticket)) return { db };
   if (ticketAlreadyInCarrierSettlement(db, ticket.id)) return { db };
 
   const dispatch = db.dispatches.find((d) => d.id === ticket.dispatchId);

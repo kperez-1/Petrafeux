@@ -55,6 +55,41 @@ export function getRouteMaterials(route: QuoteRoute): RouteMaterialLine[] {
   return normalized.materialLines ?? [];
 }
 
+/** Quote material lines: materialRate = buy, materialCost = sell */
+export function materialBuyFromLine(mat: RouteMaterialLine): number {
+  return mat.materialRate;
+}
+
+export function materialSellFromLine(mat: RouteMaterialLine): number {
+  return mat.materialCost;
+}
+
+export function resolveMaterialBuyRate(
+  line: { materialBuyRate: number; materialLines?: RouteMaterialLine[] },
+  materialLineId?: string
+): number {
+  if (line.materialLines?.length) {
+    const mat = materialLineId
+      ? line.materialLines.find((m) => m.id === materialLineId)
+      : line.materialLines[0];
+    if (mat) return materialBuyFromLine(mat);
+  }
+  return line.materialBuyRate;
+}
+
+export function resolveMaterialSellRate(
+  line: { materialSellRate: number; materialLines?: RouteMaterialLine[] },
+  materialLineId?: string
+): number {
+  if (line.materialLines?.length) {
+    const mat = materialLineId
+      ? line.materialLines.find((m) => m.id === materialLineId)
+      : line.materialLines[0];
+    if (mat) return materialSellFromLine(mat);
+  }
+  return line.materialSellRate;
+}
+
 /** Keep legacy flat fields aligned with first material line for storage compat */
 export function syncRouteLegacyMaterial(route: QuoteRoute): QuoteRoute {
   const lines = route.materialLines ?? [];

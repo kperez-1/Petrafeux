@@ -7,12 +7,11 @@ import { ClipboardList, Plus } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
 import { useActiveOffice } from "@/components/ActiveOfficeProvider";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { allOrders, createOrderFromQuote, orderTotalQuoted } from "@/lib/orders";
+import { allOrders, orderTotalQuoted } from "@/lib/orders";
 import { orderStatusLabel } from "@/lib/order-status";
 import { PageHeader, PageToolbar } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { resolveCurrentUser } from "@/lib/current-user";
 
 const STATUS_STYLES: Record<string, string> = {
   pending: "bg-gray-100 text-gray-600",
@@ -23,12 +22,10 @@ const STATUS_STYLES: Record<string, string> = {
 };
 
 export default function OrdersPage() {
-  const { db, save } = useDb();
+  const { db } = useDb();
   const { officeId } = useActiveOffice();
   const router = useRouter();
-  const user = resolveCurrentUser(db);
   const [search, setSearch] = useState("");
-  const [creating, setCreating] = useState(false);
   const [selectedQuoteId, setSelectedQuoteId] = useState("");
 
   const orders = useMemo(() => {
@@ -49,7 +46,6 @@ export default function OrdersPage() {
       db.quotes.filter(
         (q) =>
           q.status === "approved" &&
-          !db.orders.some((o) => o.quoteId === q.id) &&
           (!officeId ||
             !db.projects.find((p) => p.id === q.projectId)?.officeId ||
             db.projects.find((p) => p.id === q.projectId)?.officeId === officeId)
@@ -57,18 +53,9 @@ export default function OrdersPage() {
     [db, officeId]
   );
 
-  async function handleCreateOrder() {
+  function handleCreateOrder() {
     if (!selectedQuoteId) return;
-    setCreating(true);
-    try {
-      const { db: next, order } = createOrderFromQuote(db, selectedQuoteId, {
-        createdByUserId: user?.id,
-      });
-      await save(next);
-      router.push(`/orders/${order.id}`);
-    } finally {
-      setCreating(false);
-    }
+    router.push(`/quotes/${selectedQuoteId}/create-order`);
   }
 
   return (
@@ -100,7 +87,7 @@ export default function OrdersPage() {
             ))}
           </select>
           <Button
-            disabled={!selectedQuoteId || creating}
+            disabled={!selectedQuoteId}
             onClick={handleCreateOrder}
             className="gap-1.5 bg-[#0f6b4f] hover:bg-[#0d5a42]"
           >

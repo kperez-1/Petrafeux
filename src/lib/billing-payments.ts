@@ -15,6 +15,7 @@ export interface RecordPaymentInput {
   amount: number;
   paidAt: string;
   reference?: string;
+  note?: string;
   recordedByUserId?: string;
 }
 
@@ -42,6 +43,7 @@ export function recordInvoicePayment(
     amount: input.amount,
     paidAt: input.paidAt,
     reference: input.reference?.trim() || undefined,
+    note: input.note?.trim() || undefined,
     recordedByUserId: input.recordedByUserId,
   };
 
@@ -74,6 +76,7 @@ export function recordCarrierSettlementPayment(
     amount: input.amount,
     paidAt: input.paidAt,
     reference: input.reference?.trim() || undefined,
+    note: input.note?.trim() || undefined,
     recordedByUserId: input.recordedByUserId,
   };
 
@@ -107,6 +110,7 @@ export function recordVendorSettlementPayment(
     amount: input.amount,
     paidAt: input.paidAt,
     reference: input.reference?.trim() || undefined,
+    note: input.note?.trim() || undefined,
     recordedByUserId: input.recordedByUserId,
   };
 

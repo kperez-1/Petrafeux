@@ -1,4 +1,5 @@
 import { Db, DeliveryTicket, OrderLine, Vendor } from "./types";
+import { resolveMaterialBuyRate } from "./route-materials";
 
 /** Match dropoff/pickup address to a vendor record */
 export function resolveVendorByAddress(
@@ -57,9 +58,5 @@ export function payeeKindForTicket(ticket: DeliveryTicket): "material" | "dispos
 
 export function buyRateForVendorTicket(orderLine: OrderLine, ticket: DeliveryTicket): number {
   if (ticket.lineType === "disposal") return orderLine.disposalBuyRate ?? 0;
-  if (ticket.materialLineId && orderLine.materialLines) {
-    const mat = orderLine.materialLines.find((m) => m.id === ticket.materialLineId);
-    if (mat) return mat.materialCost;
-  }
-  return orderLine.materialBuyRate;
+  return resolveMaterialBuyRate(orderLine, ticket.materialLineId);
 }

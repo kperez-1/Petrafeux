@@ -11,6 +11,7 @@ import type { IntakeApplyPayload, IntakeMatchPreview, ParsedEmailIntake } from "
 import { mergeApplyIntoDb, type ApplyIntakeResult } from "@/lib/email-intake/apply-intake";
 import { companySlug } from "@/lib/contractors";
 import { resolveCurrentUser } from "@/lib/current-user";
+import { useActiveOffice } from "@/components/ActiveOfficeProvider";
 import { toDateInputValue, todayDateInputValue } from "@/lib/utils";
 
 export function EmailIntakeReviewSheet({
@@ -29,6 +30,7 @@ export function EmailIntakeReviewSheet({
   const { db, save } = useDb();
   const router = useRouter();
   const currentUser = resolveCurrentUser(db);
+  const { officeId: activeOfficeId } = useActiveOffice();
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,7 +58,10 @@ export function EmailIntakeReviewSheet({
     setContactPhone(sig.phone ?? "");
     setContactAddress(sig.address ?? "");
     setProjectName(parsed.project.name);
-    setProjectAddress(parsed.project.address ?? "");
+    setProjectAddress(
+      parsed.project.address ||
+        (parsed.project.addressHint ? `${parsed.project.addressHint} (verify jobsite)` : "")
+    );
     setProjectDescription(parsed.project.descriptionSnippet ?? "");
     setIntakeDueDate(toDateInputValue(parsed.project.dueDate));
     setLinkExistingProjectId(matches.projectId ?? "");
@@ -81,7 +86,7 @@ export function EmailIntakeReviewSheet({
         projectAddress: projectAddress.trim(),
         projectDescription: projectDescription.trim() || undefined,
         intakeDueDate: intakeDueDate.trim() || undefined,
-        officeId: currentUser?.officeId,
+        officeId: activeOfficeId,
         salespersonId: currentUser?.id,
         linkExistingProjectId: linkExistingProjectId || undefined,
         useExistingContractorId: useExistingContractorId || undefined,
@@ -129,6 +134,13 @@ export function EmailIntakeReviewSheet({
       onSubmit={submit}
       disabled={applying || !projectName.trim()}
     >
+      {parsed.isForwarded && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+          Forwarded email — customer resolved from the original external sender
+          {parsed.originalSender?.email ? ` (${parsed.originalSender.email})` : ""}.
+        </div>
+      )}
+
       {(matches.projectId || matches.contractorId) && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           {matches.projectId && (

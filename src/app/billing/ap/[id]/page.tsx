@@ -289,14 +289,17 @@ function ApDetailPageContent({ params }: { params: Promise<{ id: string }> }) {
               <h2 className="mb-3 font-semibold text-gray-900">Payments</h2>
               <ul className="space-y-2">
                 {apSettlement.payments.map((p) => (
-                  <li key={p.id} className="flex justify-between gap-2 text-gray-600">
-                    <span>
-                      {p.method.toUpperCase()}
-                      {p.reference ? ` · ${p.reference}` : ""}
-                    </span>
-                    <span className="font-medium text-gray-900">
-                      {formatCurrency(p.amount)}
-                    </span>
+                  <li key={p.id} className="text-gray-600">
+                    <div className="flex justify-between gap-2">
+                      <span>
+                        {p.method.toUpperCase()}
+                        {p.reference ? ` · ${p.reference}` : ""}
+                      </span>
+                      <span className="font-medium text-gray-900">
+                        {formatCurrency(p.amount)}
+                      </span>
+                    </div>
+                    {p.note && <p className="mt-0.5 text-xs text-gray-400">{p.note}</p>}
                   </li>
                 ))}
               </ul>

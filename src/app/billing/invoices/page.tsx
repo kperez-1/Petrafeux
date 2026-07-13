@@ -146,11 +146,17 @@ function CustomerInvoicesPageContent() {
     });
   }, [db, officeId, companyName, contractorIdParam, bucket, search, overdueOnly, agingBucket]);
 
-  function setParam(key: string, value: string | null) {
+  function setParams(updates: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
-    if (value) params.set(key, value);
-    else params.delete(key);
+    for (const [key, value] of Object.entries(updates)) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
     router.replace(`/billing/invoices?${params.toString()}`);
+  }
+
+  function setParam(key: string, value: string | null) {
+    setParams({ [key]: value });
   }
 
   function setBucket(next: LedgerBucket) {
@@ -181,11 +187,9 @@ function CustomerInvoicesPageContent() {
         selected={agingBucket ?? (overdueOnly ? undefined : "all")}
         onSelect={(b) => {
           if (b === "all") {
-            setParam("aging", null);
-            setParam("overdue", null);
+            setParams({ aging: null, overdue: null });
           } else {
-            setParam("aging", b);
-            setParam("overdue", null);
+            setParams({ aging: b, overdue: null });
           }
         }}
       />
@@ -208,8 +212,10 @@ function CustomerInvoicesPageContent() {
         <button
           type="button"
           onClick={() => {
-            setParam("overdue", overdueOnly ? null : "1");
-            setParam("aging", null);
+            setParams({
+              overdue: overdueOnly ? null : "1",
+              aging: null,
+            });
           }}
           className={`rounded-full px-3 py-1 text-sm font-medium transition ${
             overdueOnly

@@ -52,6 +52,17 @@ function parsePhotos(raw: unknown): string[] | undefined {
   return undefined;
 }
 
+function parseVendorDocuments(raw: unknown): import("./types").VendorDocument[] | undefined {
+  if (typeof raw !== "string" || !raw) return undefined;
+  try {
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr) && arr.length) return arr as import("./types").VendorDocument[];
+  } catch {
+    /* ignore malformed */
+  }
+  return undefined;
+}
+
 type D1Database = {
   prepare: (sql: string) => {
     bind: (...args: unknown[]) => {
@@ -268,6 +279,7 @@ async function loadFromD1(d1: D1Database): Promise<Db> {
       taxId: r.tax_id ? String(r.tax_id) : undefined,
       w9OnFile: Number(r.w9_on_file) === 1 ? true : undefined,
       w9FileUrl: r.w9_file_url ? String(r.w9_file_url) : undefined,
+      documents: parseVendorDocuments(r.documents_json),
     })),
     materials: materials.results.map((r) => ({
       id: String(r.id),
@@ -276,6 +288,7 @@ async function loadFromD1(d1: D1Database): Promise<Db> {
       type: String(r.type ?? ""),
       pricePerTon: Number(r.price_per_ton) || 0,
       priceUnit: (r.price_unit as Material["priceUnit"]) ?? "TN",
+      rateExpiresOn: r.rate_expires_on ? String(r.rate_expires_on) : undefined,
       photos: parsePhotos(r.photos),
     })),
     haulRates: haulRates.results.map((r) =>
@@ -781,8 +794,8 @@ async function saveToD1(d1: D1Database, db: Db): Promise<void> {
     await d1
       .prepare(
         `INSERT INTO vendors (id, name, address, lat, lng, type, temporary, contact_name, contact_email,
-         contact_phone, payment_terms_days, tax_id, w9_on_file, w9_file_url)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         contact_phone, payment_terms_days, tax_id, w9_on_file, w9_file_url, documents_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         v.id,
@@ -798,14 +811,15 @@ async function saveToD1(d1: D1Database, db: Db): Promise<void> {
         v.paymentTermsDays ?? null,
         v.taxId ?? null,
         v.w9OnFile ? 1 : 0,
-        v.w9FileUrl ?? null
+        v.w9FileUrl ?? null,
+        v.documents?.length ? JSON.stringify(v.documents) : null
       )
       .run();
   }
   for (const m of normalized.materials) {
     await d1
       .prepare(
-        "INSERT INTO materials (id, vendor_id, name, type, price_per_ton, price_unit, photos) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO materials (id, vendor_id, name, type, price_per_ton, price_unit, photos, rate_expires_on) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
       )
       .bind(
         m.id,
@@ -814,7 +828,8 @@ async function saveToD1(d1: D1Database, db: Db): Promise<void> {
         m.type,
         m.pricePerTon,
         m.priceUnit ?? "TN",
-        m.photos?.length ? JSON.stringify(m.photos) : null
+        m.photos?.length ? JSON.stringify(m.photos) : null,
+        m.rateExpiresOn ?? null
       )
       .run();
   }

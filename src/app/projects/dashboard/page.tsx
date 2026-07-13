@@ -18,6 +18,7 @@ import { EmailIntakeCard } from "@/components/projects/EmailIntakeCard";
 import { PROJECT_STAGES, Project, ProjectStage } from "@/lib/types";
 import { setProjectStage } from "@/lib/projects";
 import { resolveCurrentUser } from "@/lib/current-user";
+import { useActiveOffice } from "@/components/ActiveOfficeProvider";
 
 const ACTIVE_STAGES: ProjectStage[] = [
   "new",
@@ -104,8 +105,8 @@ function ProjectCard({
 export default function ProjectsDashboardPage() {
   const { db, save } = useDb();
   const [search, setSearch] = useState("");
-  const [officeFilter, setOfficeFilter] = useState("");
   const [salesFilter, setSalesFilter] = useState("");
+  const { officeId } = useActiveOffice();
   const [showArchived, setShowArchived] = useState(false);
   const [myProjectsOnly, setMyProjectsOnly] = useState(false);
   const [open, setOpen] = useState(false);
@@ -120,7 +121,7 @@ export default function ProjectsDashboardPage() {
         /* show all when archived toggle for closed lost column */
       }
       if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false;
-      if (officeFilter && p.officeId !== officeFilter) return false;
+      if (p.officeId !== officeId) return false;
       if (salesFilter && p.salespersonId !== salesFilter) return false;
       if (
         myProjectsOnly &&
@@ -131,7 +132,7 @@ export default function ProjectsDashboardPage() {
       }
       return true;
     });
-  }, [db.projects, search, officeFilter, salesFilter, showArchived, myProjectsOnly, currentUser]);
+  }, [db.projects, search, officeId, salesFilter, showArchived, myProjectsOnly, currentUser]);
 
   const columns = showArchived
     ? [...ACTIVE_STAGES, ARCHIVED_STAGE]
@@ -195,18 +196,6 @@ export default function ProjectsDashboardPage() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <select
-          className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm"
-          value={officeFilter}
-          onChange={(e) => setOfficeFilter(e.target.value)}
-        >
-          <option value="">All offices</option>
-          {db.offices.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.code}
-            </option>
-          ))}
-        </select>
         <select
           className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm"
           value={salesFilter}

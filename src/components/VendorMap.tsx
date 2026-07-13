@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, ExternalLink, Search, MapPin, Plus, Loader2, Trash2, Truck, FileText } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
+import { useActiveOffice } from "@/components/ActiveOfficeProvider";
 import { Vendor, Material, MaterialPriceUnit, Quote } from "@/lib/types";
 import { geocodeVendorsMissingCoords, vendorHasCoords } from "@/lib/geocode-vendors";
 import { formatMaterialPrice, formatCurrency, generateId } from "@/lib/utils";
@@ -40,6 +41,7 @@ interface VendorMapProps {
 
 export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName }: VendorMapProps) {
   const { db, save } = useDb();
+  const { officeId: activeOfficeId } = useActiveOffice();
   const router = useRouter();
   const [jobAddress, setJobAddress] = useState(projectAddress ?? "");
   const [jobName, setJobName] = useState(projectName ?? "");
@@ -337,7 +339,7 @@ export function VendorMap({ onClose, onApplyToQuote, projectAddress, projectName
       const project = buildNewProject({
         name,
         address,
-        officeId: currentUser?.officeId ?? db.offices[0]?.id,
+        officeId: activeOfficeId,
         salespersonId: currentUser?.id,
         stage: "proposal_requested",
       });

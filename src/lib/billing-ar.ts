@@ -10,6 +10,8 @@ import { generateInvoiceNumber } from "./storage";
 import { getOrder, markOrderInvoiced } from "./orders";
 import { approvedTicketsForOrder } from "./delivery-tickets";
 import { normalizeMaterialUnit, unitRateLabel } from "./types";
+import { actsAsHaulTicket } from "./delivery-ticket-billing";
+import { resolveMaterialSellRate } from "./route-materials";
 
 function findOrderLine(db: Db, orderLineId: string): OrderLine | undefined {
   for (const order of db.orders) {
@@ -21,7 +23,7 @@ function findOrderLine(db: Db, orderLineId: string): OrderLine | undefined {
 
 function ticketDescription(ticket: DeliveryTicket, line: OrderLine): string {
   const route = [line.pickupAddress, line.dropoffAddress].filter(Boolean).join(" → ");
-  if (ticket.lineType === "haul") {
+  if (actsAsHaulTicket(ticket)) {
     return `Hauling${route ? ` — ${route}` : ""}`;
   }
   if (ticket.lineType === "disposal") {
@@ -36,13 +38,9 @@ function ticketDescription(ticket: DeliveryTicket, line: OrderLine): string {
 }
 
 function sellRateForTicket(line: OrderLine, ticket: DeliveryTicket): number {
-  if (ticket.lineType === "haul") return line.haulSellRate;
+  if (actsAsHaulTicket(ticket)) return line.haulSellRate;
   if (ticket.lineType === "disposal") return line.disposalSellRate ?? 0;
-  if (ticket.materialLineId && line.materialLines) {
-    const mat = line.materialLines.find((m) => m.id === ticket.materialLineId);
-    if (mat) return mat.materialRate;
-  }
-  return line.materialSellRate;
+  return resolveMaterialSellRate(line, ticket.materialLineId);
 }
 
 function isTicketTaxable(line: OrderLine, ticket: DeliveryTicket): boolean {
@@ -177,9 +175,34 @@ function recalcInvoice(invoice: CustomerInvoice, taxRate: number): CustomerInvoi
 }
 
 export function ticketAlreadyInvoiced(db: Db, ticketId: string): boolean {
-  return db.customerInvoices.some((inv) =>
-    inv.lines.some((l) => l.deliveryTicketId === ticketId)
+  return invoiceLinesForTicket(db, ticketId).length > 0;
+}
+
+export function invoiceLinesForTicket(db: Db, ticketId: string) {
+  return db.customerInvoices.flatMap((inv) =>
+    inv.lines.filter((l) => l.deliveryTicketId === ticketId)
   );
+}
+
+export function invoiceChargeExists(
+  db: Db,
+  ticketId: string,
+  charge: DeliveryTicket["lineType"]
+): boolean {
+  const lines = invoiceLinesForTicket(db, ticketId);
+  if (charge === "haul" || charge === "delivery") {
+    return lines.some((l) => l.description.startsWith("Hauling"));
+  }
+  if (charge === "disposal") {
+    return lines.some((l) => l.description.startsWith("Disposal"));
+  }
+  if (charge === "material") {
+    return lines.some(
+      (l) =>
+        !l.description.startsWith("Hauling") && !l.description.startsWith("Disposal")
+    );
+  }
+  return false;
 }
 
 export function draftInvoiceForOrder(db: Db, orderId: string): CustomerInvoice | undefined {
@@ -191,7 +214,7 @@ export function appendTicketToDraftInvoice(
   ticket: DeliveryTicket
 ): { db: Db; invoice: CustomerInvoice } {
   if (ticket.status !== "approved") throw new Error("Ticket must be approved");
-  if (ticketAlreadyInvoiced(db, ticket.id)) {
+  if (invoiceChargeExists(db, ticket.id, ticket.lineType)) {
     const existing = db.customerInvoices.find((inv) =>
       inv.lines.some((l) => l.deliveryTicketId === ticket.id)
     );

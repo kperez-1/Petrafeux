@@ -133,6 +133,20 @@ export interface Vendor {
   taxId?: string;
   w9OnFile?: boolean;
   w9FileUrl?: string;
+  /** Contracts, rate confirmations, and related files */
+  documents?: VendorDocument[];
+}
+
+export type VendorDocumentLabel = "contract" | "rate_confirmation" | "other";
+
+export interface VendorDocument {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  uploadedAt: string;
+  label?: VendorDocumentLabel;
+  /** Data URL or external URL for prototype storage */
+  dataUrl: string;
 }
 
 /** Material pricing unit codes */
@@ -178,6 +192,8 @@ export interface Material {
   /** Price amount; unit is stored in priceUnit */
   pricePerTon: number;
   priceUnit?: MaterialPriceUnit;
+  /** YYYY-MM-DD — when this buy rate expires */
+  rateExpiresOn?: string;
   /** Resized JPEG data URLs (base64) attached to this material */
   photos?: string[];
 }
@@ -392,7 +408,7 @@ export interface Dispatch {
 
 export type DeliveryTicketStatus = "pending_review" | "approved" | "rejected";
 
-export type DeliveryTicketLineType = "haul" | "material" | "disposal";
+export type DeliveryTicketLineType = "haul" | "material" | "disposal" | "delivery";
 
 export interface DeliveryTicket {
   id: string;
@@ -431,6 +447,7 @@ export interface PaymentRecord {
   amount: number;
   paidAt: string;
   reference?: string;
+  note?: string;
   recordedByUserId?: string;
 }
 

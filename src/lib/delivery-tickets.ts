@@ -54,7 +54,7 @@ export function recordDeliveryTicket(db: Db, input: RecordTicketInput): { db: Db
 
   const unit =
     input.unit ??
-    (input.lineType === "haul"
+    (input.lineType === "haul" || input.lineType === "delivery"
       ? orderLine.haulUnit ?? "TN"
       : input.lineType === "disposal"
         ? orderLine.materialUnit ?? "TN"

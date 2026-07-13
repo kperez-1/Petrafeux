@@ -11,13 +11,18 @@ import {
   ArrowLeft,
   Camera,
   X,
+  FileText,
+  Trash2,
+  Upload,
 } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
-import { generateId } from "@/lib/utils";
+import { formatDate, generateId, todayDateInputValue } from "@/lib/utils";
 import { filesToResizedDataUrls } from "@/lib/image-utils";
 import {
   Material,
   Vendor,
+  VendorDocument,
+  VendorDocumentLabel,
   MATERIAL_PRICE_UNITS,
   DEFAULT_MATERIAL_PRICE_UNIT,
   MaterialPriceUnit,
@@ -32,6 +37,14 @@ import { PartyBalanceCard } from "@/components/billing/PartyBalanceCard";
 import { apBalanceSummary, apRowsForVendor } from "@/lib/billing-ledger";
 import { Pencil } from "lucide-react";
 
+const MAX_DOC_BYTES = 2.5 * 1024 * 1024;
+
+const DOC_LABELS: { value: VendorDocumentLabel; label: string }[] = [
+  { value: "contract", label: "Contract" },
+  { value: "rate_confirmation", label: "Rate confirmation" },
+  { value: "other", label: "Other" },
+];
+
 function hasCoords(v: Vendor): boolean {
   return (
     typeof v.lat === "number" &&
@@ -39,6 +52,20 @@ function hasCoords(v: Vendor): boolean {
     typeof v.lng === "number" &&
     isFinite(v.lng)
   );
+}
+
+function isExpired(date?: string): boolean {
+  if (!date) return false;
+  return date < todayDateInputValue();
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(file);
+  });
 }
 
 export default function VendorDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -50,12 +77,16 @@ export default function VendorDetailPage({ params }: { params: Promise<{ id: str
     type: "",
     pricePerTon: "",
     priceUnit: DEFAULT_MATERIAL_PRICE_UNIT as MaterialPriceUnit,
+    rateExpiresOn: "",
     photos: [] as string[],
   });
   const [editingPrices, setEditingPrices] = useState<Record<string, string>>({});
   const [editingNames, setEditingNames] = useState<Record<string, string>>({});
   const [editingTypes, setEditingTypes] = useState<Record<string, string>>({});
   const [vendorEditOpen, setVendorEditOpen] = useState(false);
+  const [bulkExpiresOn, setBulkExpiresOn] = useState("");
+  const [docLabel, setDocLabel] = useState<VendorDocumentLabel>("rate_confirmation");
+  const [docError, setDocError] = useState<string | null>(null);
 
   const vendor = db.vendors.find((v) => v.id === id);
   const materials = db.materials.filter((m) => m.vendorId === id);
@@ -86,21 +117,81 @@ export default function VendorDetailPage({ params }: { params: Promise<{ id: str
       vendorName: vendor.name,
       pricePerTon: parseFloat(form.pricePerTon) || 0,
       priceUnit: form.priceUnit,
+      rateExpiresOn: form.rateExpiresOn || undefined,
       photos: form.photos.length ? form.photos : undefined,
     };
     await save({ ...db, materials: [m, ...db.materials] });
-    setForm({ name: "", type: "", pricePerTon: "", priceUnit: DEFAULT_MATERIAL_PRICE_UNIT, photos: [] });
+    setForm({
+      name: "",
+      type: "",
+      pricePerTon: "",
+      priceUnit: DEFAULT_MATERIAL_PRICE_UNIT,
+      rateExpiresOn: "",
+      photos: [],
+    });
     setOpen(false);
   }
 
   async function updateMaterial(
     materialId: string,
-    patch: Partial<Pick<Material, "pricePerTon" | "priceUnit" | "name" | "type" | "photos">>
+    patch: Partial<
+      Pick<Material, "pricePerTon" | "priceUnit" | "name" | "type" | "photos" | "rateExpiresOn">
+    >
   ) {
     await save({
       ...db,
       materials: db.materials.map((m) =>
         m.id === materialId ? { ...m, ...patch } : m
+      ),
+    });
+  }
+
+  async function applyExpiresToAll() {
+    if (!bulkExpiresOn || !vendor) return;
+    await save({
+      ...db,
+      materials: db.materials.map((m) =>
+        m.vendorId === vendor.id ? { ...m, rateExpiresOn: bulkExpiresOn } : m
+      ),
+    });
+  }
+
+  async function uploadVendorDocument(files: FileList | null) {
+    if (!files?.length || !vendor) return;
+    setDocError(null);
+    const nextDocs: VendorDocument[] = [...(vendor.documents ?? [])];
+    for (const file of Array.from(files)) {
+      if (file.size > MAX_DOC_BYTES) {
+        setDocError(`"${file.name}" is too large (max ~2.5 MB).`);
+        continue;
+      }
+      const dataUrl = await readFileAsDataUrl(file);
+      nextDocs.unshift({
+        id: generateId(),
+        fileName: file.name,
+        mimeType: file.type || "application/octet-stream",
+        uploadedAt: new Date().toISOString(),
+        label: docLabel,
+        dataUrl,
+      });
+    }
+    await save({
+      ...db,
+      vendors: db.vendors.map((v) =>
+        v.id === vendor.id ? { ...v, documents: nextDocs } : v
+      ),
+    });
+  }
+
+  async function removeVendorDocument(docId: string) {
+    if (!vendor) return;
+    const nextDocs = (vendor.documents ?? []).filter((d) => d.id !== docId);
+    await save({
+      ...db,
+      vendors: db.vendors.map((v) =>
+        v.id === vendor.id
+          ? { ...v, documents: nextDocs.length ? nextDocs : undefined }
+          : v
       ),
     });
   }
@@ -277,7 +368,82 @@ export default function VendorDetailPage({ params }: { params: Promise<{ id: str
         </div>
       )}
 
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5 text-gray-500" />
+            <div>
+              <h2 className="font-semibold text-gray-900">Contracts &amp; rate confirmations</h2>
+              <p className="text-sm text-gray-500">
+                Store vendor contracts and emailed rate sheets. Auto-apply rates coming later.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              className="h-9 rounded-md border border-gray-200 bg-white px-2 text-sm"
+              value={docLabel}
+              onChange={(e) => setDocLabel(e.target.value as VendorDocumentLabel)}
+            >
+              {DOC_LABELS.map((l) => (
+                <option key={l.value} value={l.value}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+            <label className="inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <Upload className="h-3.5 w-3.5" />
+              Upload
+              <input
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.msg,.eml,image/*,application/pdf"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  void uploadVendorDocument(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+            </label>
+          </div>
+        </div>
+        {docError && <p className="mb-2 text-sm text-red-600">{docError}</p>}
+        {(vendor.documents ?? []).length === 0 ? (
+          <p className="text-sm text-gray-400">No documents uploaded yet.</p>
+        ) : (
+          <ul className="divide-y divide-gray-100">
+            {(vendor.documents ?? []).map((doc) => (
+              <li key={doc.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <a
+                    href={doc.dataUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-[#0f6b4f] hover:underline"
+                  >
+                    {doc.fileName}
+                  </a>
+                  <p className="text-xs text-gray-400">
+                    {DOC_LABELS.find((l) => l.value === doc.label)?.label ?? "Document"} ·{" "}
+                    {formatDate(doc.uploadedAt)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeVendorDocument(doc.id)}
+                  className="shrink-0 text-gray-300 hover:text-red-500"
+                  aria-label="Remove document"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="mt-3 text-xs text-gray-400">Apply rates from document — coming soon</p>
+      </div>
+
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-100">
             <Package className="h-5 w-5 text-gray-500" />
@@ -289,12 +455,35 @@ export default function VendorDetailPage({ params }: { params: Promise<{ id: str
             </p>
           </div>
         </div>
-        <Button
-          className="bg-[#0f6b4f] hover:bg-[#0d5c43] text-white gap-1"
-          onClick={() => setOpen(true)}
-        >
-          <Plus className="h-4 w-4" /> Add Material
-        </Button>
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="space-y-1">
+            <label className="text-xs text-gray-500">Expires (all materials)</label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="date"
+                className="h-9 w-[150px]"
+                value={bulkExpiresOn}
+                onChange={(e) => setBulkExpiresOn(e.target.value)}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9"
+                disabled={!bulkExpiresOn || materials.length === 0}
+                onClick={() => void applyExpiresToAll()}
+              >
+                Apply to all
+              </Button>
+            </div>
+          </div>
+          <Button
+            className="bg-[#0f6b4f] hover:bg-[#0d5c43] text-white gap-1"
+            onClick={() => setOpen(true)}
+          >
+            <Plus className="h-4 w-4" /> Add Material
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -305,17 +494,18 @@ export default function VendorDetailPage({ params }: { params: Promise<{ id: str
               <th className="px-4 py-3 text-left font-medium">Type</th>
               <th className="px-4 py-3 text-left font-medium">Price</th>
               <th className="px-4 py-3 text-left font-medium">Unit</th>
+              <th className="px-4 py-3 text-left font-medium">Expires</th>
               <th className="px-4 py-3 text-left font-medium">Photos</th>
             </tr>
           </thead>
           <tbody>
-            {materials.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
-                  No materials for this vendor yet. Add one above.
-                </td>
-              </tr>
-            )}
+                {materials.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                      No materials for this vendor yet. Add one above.
+                    </td>
+                  </tr>
+                )}
             {materials.map((m) => {
               const editVal = editingPrices[m.id] ?? String(m.pricePerTon);
               const unit = normalizeMaterialUnit(m.priceUnit);
@@ -405,6 +595,25 @@ export default function VendorDetailPage({ params }: { params: Promise<{ id: str
                     </select>
                   </td>
                   <td className="px-4 py-3">
+                    <div className="space-y-0.5">
+                      <Input
+                        type="date"
+                        className={`h-8 w-[140px] ${
+                          isExpired(m.rateExpiresOn) ? "border-amber-400 text-amber-800" : ""
+                        }`}
+                        value={m.rateExpiresOn ?? ""}
+                        onChange={(e) =>
+                          updateMaterial(m.id, {
+                            rateExpiresOn: e.target.value || undefined,
+                          })
+                        }
+                      />
+                      {isExpired(m.rateExpiresOn) && (
+                        <p className="text-[10px] font-medium text-amber-700">Expired</p>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-2">
                       {(m.photos ?? []).map((src, i) => (
                         <div key={i} className="group relative h-12 w-12 overflow-hidden rounded-md border border-gray-200">
@@ -447,7 +656,15 @@ export default function VendorDetailPage({ params }: { params: Promise<{ id: str
         open={open}
         onOpenChange={(o) => {
           setOpen(o);
-          if (!o) setForm({ name: "", type: "", pricePerTon: "", priceUnit: DEFAULT_MATERIAL_PRICE_UNIT, photos: [] });
+          if (!o)
+            setForm({
+              name: "",
+              type: "",
+              pricePerTon: "",
+              priceUnit: DEFAULT_MATERIAL_PRICE_UNIT,
+              rateExpiresOn: "",
+              photos: [],
+            });
         }}
       >
         <SheetContent className="w-full max-w-[420px]">
@@ -497,6 +714,14 @@ export default function VendorDetailPage({ params }: { params: Promise<{ id: str
                 value={form.pricePerTon}
                 onChange={(e) => setForm({ ...form, pricePerTon: e.target.value })}
                 placeholder="0.00"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium text-gray-700">Rate expires</label>
+              <Input
+                type="date"
+                value={form.rateExpiresOn}
+                onChange={(e) => setForm({ ...form, rateExpiresOn: e.target.value })}
               />
             </div>
             <div className="space-y-1">

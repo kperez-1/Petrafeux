@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useDb } from "@/components/DbProvider";
+import { useActiveOffice } from "@/components/ActiveOfficeProvider";
 import { CreateFormSheet, FormField, FormSection } from "@/components/layout";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,6 +31,7 @@ export function ProjectFormSheet({
   const [salespersonId, setSalespersonId] = useState("");
 
   const currentUser = resolveCurrentUser(db);
+  const { officeId: activeOfficeId } = useActiveOffice();
   const salespeople = db.users.filter((u) => u.role === "salesperson" || u.role === "admin");
 
   const isEdit = Boolean(project);
@@ -46,10 +48,10 @@ export function ProjectFormSheet({
       setName("");
       setAddress("");
       setDescription("");
-      setOfficeId(currentUser?.officeId ?? db.offices[0]?.id ?? "");
+      setOfficeId(activeOfficeId);
       setSalespersonId(currentUser?.id ?? "");
     }
-  }, [open, project, currentUser, db.offices]);
+  }, [open, project, currentUser, activeOfficeId]);
 
   async function submit() {
     if (!name.trim()) return;

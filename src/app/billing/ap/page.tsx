@@ -184,11 +184,17 @@ function AccountsPayablePageContent() {
     [approvedRows]
   );
 
-  function setParam(key: string, value: string | null) {
+  function setParams(updates: Record<string, string | null>) {
     const params = new URLSearchParams(searchParams.toString());
-    if (value) params.set(key, value);
-    else params.delete(key);
+    for (const [key, value] of Object.entries(updates)) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
     router.replace(`/billing/ap?${params.toString()}`);
+  }
+
+  function setParam(key: string, value: string | null) {
+    setParams({ [key]: value });
   }
 
   function setBucket(next: LedgerBucket) {
@@ -227,11 +233,9 @@ function AccountsPayablePageContent() {
         selected={agingBucket ?? "all"}
         onSelect={(b) => {
           if (b === "all") {
-            setParam("aging", null);
-            setParam("overdue", null);
+            setParams({ aging: null, overdue: null });
           } else {
-            setParam("aging", b);
-            setParam("overdue", null);
+            setParams({ aging: b, overdue: null });
           }
         }}
       />
@@ -284,8 +288,10 @@ function AccountsPayablePageContent() {
         <button
           type="button"
           onClick={() => {
-            setParam("overdue", overdueOnly ? null : "1");
-            setParam("aging", null);
+            setParams({
+              overdue: overdueOnly ? null : "1",
+              aging: null,
+            });
           }}
           className={`rounded-full px-3 py-1 text-sm font-medium transition ${
             overdueOnly

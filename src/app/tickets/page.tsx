@@ -11,6 +11,7 @@ import {
   ticketsGroupedByTrip,
 } from "@/lib/delivery-tickets";
 import { getTrip } from "@/lib/trips";
+import { deliveryTicketLineLabel } from "@/lib/delivery-ticket-billing";
 import { PageHeader, PageToolbar } from "@/components/layout";
 import { Input } from "@/components/ui/input";
 
@@ -124,7 +125,9 @@ export default function TicketsInboxPage() {
                                 <span className="font-medium text-gray-900">
                                   {ticket.number ?? ticket.id.slice(0, 8)}
                                 </span>
-                                <span className="ml-2 capitalize text-gray-500">{ticket.lineType}</span>
+                                <span className="ml-2 text-gray-500">
+                                  {deliveryTicketLineLabel(ticket.lineType)}
+                                </span>
                               </span>
                               <span className="text-gray-600">
                                 {ticket.qty} {ticket.unit}

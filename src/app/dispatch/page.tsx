@@ -50,12 +50,12 @@ export default function DispatchPage() {
     }
   }
 
-  async function handleRecordTicket(dispatchId: string, lineType: "haul" | "material" | "disposal") {
+  async function handleRecordTicket(dispatchId: string) {
     setBusy(true);
     try {
       const { db: next } = recordDeliveryTicket(db, {
         dispatchId,
-        lineType,
+        lineType: "delivery",
         qty: 1,
       });
       await save(next);
@@ -143,18 +143,9 @@ export default function DispatchPage() {
                                       variant="ghost"
                                       className="h-6 px-2 text-[10px]"
                                       disabled={busy}
-                                      onClick={() => handleRecordTicket(d.id, "haul")}
+                                      onClick={() => handleRecordTicket(d.id)}
                                     >
-                                      + Haul ticket
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-6 px-2 text-[10px]"
-                                      disabled={busy}
-                                      onClick={() => handleRecordTicket(d.id, "material")}
-                                    >
-                                      + Material
+                                      + Delivery ticket
                                     </Button>
                                   </div>
                                 </li>

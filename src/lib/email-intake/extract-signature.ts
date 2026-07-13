@@ -1,6 +1,6 @@
 import type { ParsedSignature } from "./types";
-
-const INTERNAL_DOMAINS = ["alliedtk.com", "petrafi.com"];
+import { getInternalEmailDomains, emailDomain } from "../active-office";
+import type { Db } from "../types";
 
 const SIG_DELIMITERS = [
   /\n--\s*\n/,
@@ -10,9 +10,11 @@ const SIG_DELIMITERS = [
   /\nThis email and any attachments/i,
 ];
 
-export function isInternalEmail(email: string): boolean {
-  const domain = email.split("@")[1]?.toLowerCase() ?? "";
-  return INTERNAL_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`));
+export function isInternalEmail(email: string, internalDomains?: string[]): boolean {
+  const domains = internalDomains ?? getInternalEmailDomains();
+  const domain = emailDomain(email);
+  if (!domain) return false;
+  return domains.some((d) => domain === d || domain.endsWith(`.${d}`));
 }
 
 export function splitBodyAndSignature(bodyText: string): {
@@ -29,13 +31,30 @@ export function splitBodyAndSignature(bodyText: string): {
   return { mainBody, signatureBlock };
 }
 
-function parseEmbeddedFrom(body: string): { name: string; email: string } | null {
-  const m = body.match(/From:\s*([^\n<]+?)\s*<([^>]+)>/i);
-  if (m) {
-    return { name: m[1].trim(), email: m[2].trim().toLowerCase() };
+export function findAllEmbeddedSenders(body: string): { name: string; email: string }[] {
+  const results: { name: string; email: string }[] = [];
+  const re = /From:\s*([^\n<]+?)\s*<([^>]+)>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    results.push({ name: m[1].trim(), email: m[2].trim().toLowerCase() });
   }
-  const m2 = body.match(/From:\s*(\S+@\S+)/i);
-  if (m2) return { name: "", email: m2[1].trim().toLowerCase() };
+  const re2 = /From:\s*(\S+@\S+)/gi;
+  while ((m = re2.exec(body)) !== null) {
+    const email = m[1].trim().toLowerCase();
+    if (!results.some((r) => r.email === email)) {
+      results.push({ name: "", email });
+    }
+  }
+  return results;
+}
+
+export function findOriginalExternalSender(
+  body: string,
+  internalDomains: string[]
+): { name: string; email: string } | null {
+  for (const sender of findAllEmbeddedSenders(body)) {
+    if (!isInternalEmail(sender.email, internalDomains)) return sender;
+  }
   return null;
 }
 
@@ -116,41 +135,52 @@ function parseSignatureBlock(block: string): ParsedSignature {
 
 export function extractCustomerFromBody(
   bodyText: string,
-  topSender: { name: string; email: string }
+  topSender: { name: string; email: string },
+  options?: { db?: Db; internalDomains?: string[] }
 ): {
   signature: ParsedSignature;
   mainBody: string;
   isForwarded: boolean;
   originalSender?: { name: string; email: string };
 } {
+  const internalDomains =
+    options?.internalDomains ?? getInternalEmailDomains(options?.db);
   const { mainBody, signatureBlock } = splitBodyAndSignature(bodyText);
-  const embedded = parseEmbeddedFrom(mainBody);
-  const forwarded = isInternalEmail(topSender.email) && embedded != null;
+  const embeddedSenders = findAllEmbeddedSenders(mainBody);
+  const externalOriginal = findOriginalExternalSender(mainBody, internalDomains);
+  const topInternal = isInternalEmail(topSender.email, internalDomains);
+  const forwarded =
+    topInternal ||
+    embeddedSenders.length > 0 ||
+    /^\s*(FW|Fwd|RE):/im.test(bodyText.slice(0, 200));
 
-  if (forwarded && embedded && !isInternalEmail(embedded.email)) {
-    const sig = parseSignatureBlock(signatureBlock);
-    if (!sig.email) sig.email = embedded.email;
-    if (!sig.name) sig.name = embedded.name;
-    if (!sig.company) sig.company = companyFromEmail(embedded.email);
-    return {
-      signature: sig,
-      mainBody,
-      isForwarded: true,
-      originalSender: embedded,
-    };
-  }
+  const customerSender = externalOriginal ?? (topInternal ? null : topSender);
 
-  const useEmail = forwarded && embedded ? embedded.email : topSender.email;
-  const useName = forwarded && embedded ? embedded.name : topSender.name;
   const sig = parseSignatureBlock(signatureBlock);
-  if (!sig.email) sig.email = useEmail;
-  if (!sig.name) sig.name = useName;
-  if (!sig.company) sig.company = companyFromEmail(useEmail);
+  if (customerSender) {
+    if (
+      externalOriginal ||
+      !sig.email ||
+      isInternalEmail(sig.email, internalDomains)
+    ) {
+      sig.email = customerSender.email;
+    }
+    if (externalOriginal || !sig.name) sig.name = customerSender.name;
+    if (externalOriginal || !sig.company) {
+      sig.company = companyFromEmail(customerSender.email);
+    }
+  } else {
+    const useEmail = topSender.email;
+    const useName = topSender.name;
+    if (!sig.email) sig.email = useEmail;
+    if (!sig.name) sig.name = useName;
+    if (!sig.company) sig.company = companyFromEmail(useEmail);
+  }
 
   return {
     signature: sig,
     mainBody,
     isForwarded: forwarded,
-    originalSender: embedded ?? undefined,
+    originalSender: externalOriginal ?? embeddedSenders[0],
   };
 }

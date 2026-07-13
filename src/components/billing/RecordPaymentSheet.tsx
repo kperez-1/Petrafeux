@@ -25,6 +25,7 @@ export function RecordPaymentSheet({
   const [amount, setAmount] = useState("");
   const [paidAt, setPaidAt] = useState("");
   const [reference, setReference] = useState("");
+  const [note, setNote] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -34,6 +35,7 @@ export function RecordPaymentSheet({
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     setPaidAt(now.toISOString().slice(0, 16));
     setReference("");
+    setNote("");
   }, [open, defaultAmount]);
 
   async function submit() {
@@ -45,6 +47,7 @@ export function RecordPaymentSheet({
         amount: parsed,
         paidAt: new Date(paidAt).toISOString(),
         reference,
+        note,
         recordedByUserId: db.meta.currentUserId,
       })
     );
@@ -96,6 +99,14 @@ export function RecordPaymentSheet({
             value={reference}
             onChange={(e) => setReference(e.target.value)}
             placeholder="Check # or ACH trace"
+          />
+        </FormField>
+        <FormField label="Note">
+          <textarea
+            className="min-h-[80px] w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Optional note for this payment…"
           />
         </FormField>
       </FormSection>

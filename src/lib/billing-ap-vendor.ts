@@ -18,6 +18,7 @@ import {
 } from "./vendor-payables";
 import { normalizeMaterialUnit } from "./types";
 import { assertCanMarkVendorPaid } from "./billing-disputes";
+import { actsAsHaulTicket } from "./delivery-ticket-billing";
 
 function findOrderLine(db: Db, orderLineId: string): OrderLine | undefined {
   for (const order of db.orders) {
@@ -55,7 +56,7 @@ export function buildVendorSettlementLine(
 ): VendorSettlementLine | null {
   const line = findOrderLine(db, ticket.orderLineId);
   if (!line) return null;
-  if (ticket.lineType === "haul") return null;
+  if (ticket.lineType === "haul" || ticket.lineType === "delivery") return null;
 
   const buyRate = buyRateForVendorTicket(line, ticket);
   if (buyRate <= 0) return null;
@@ -237,6 +238,17 @@ function recalcVendorSettlement(settlement: VendorSettlement): VendorSettlement 
   return { ...settlement, subtotal, netPay: subtotal };
 }
 
+export function vendorTicketChargeExists(
+  db: Db,
+  ticketId: string,
+  payeeKind: VendorSettlementPayeeKind
+): boolean {
+  return db.vendorSettlements.some(
+    (s) =>
+      s.payeeKind === payeeKind && s.lines.some((l) => l.deliveryTicketId === ticketId)
+  );
+}
+
 export function ticketAlreadyInVendorSettlement(db: Db, ticketId: string): boolean {
   return db.vendorSettlements.some((s) =>
     s.lines.some((l) => l.deliveryTicketId === ticketId)
@@ -262,8 +274,10 @@ export function appendTicketToDraftVendorSettlement(
   db: Db,
   ticket: DeliveryTicket
 ): { db: Db; settlement?: VendorSettlement } {
-  if (ticket.lineType === "haul" || ticket.status !== "approved") return { db };
-  if (ticketAlreadyInVendorSettlement(db, ticket.id)) return { db };
+  if (actsAsHaulTicket(ticket) || ticket.status !== "approved") return { db };
+
+  const payeeKind = payeeKindForTicket(ticket);
+  if (vendorTicketChargeExists(db, ticket.id, payeeKind)) return { db };
 
   const line = findOrderLine(db, ticket.orderLineId);
   if (!line) return { db };
@@ -271,7 +285,6 @@ export function appendTicketToDraftVendorSettlement(
   const vendorId = vendorIdForTicket(db, line, ticket);
   if (!vendorId) return { db };
 
-  const payeeKind = payeeKindForTicket(ticket);
   const settlementLine = buildVendorSettlementLine(db, ticket);
   if (!settlementLine) return { db };
 

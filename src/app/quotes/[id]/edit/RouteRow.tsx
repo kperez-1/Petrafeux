@@ -31,6 +31,7 @@ import {
   catalogMaterials,
   applyCatalogMaterialToLine,
   emptyMaterialLine,
+  materialVendorIds,
 } from "@/lib/route-materials";
 import { haulBuyRateForUnit } from "@/lib/haul-pricing";
 import { formatCurrency, roundCents, ceilCents } from "@/lib/utils";
@@ -138,7 +139,13 @@ function MaterialLineRow({
   }
 
   return (
-    <div className={lineIndex > 0 ? "mt-3 border-t border-gray-200 pt-3" : ""}>
+    <div
+      className={
+        lineIndex > 0
+          ? "mt-3 rounded-md border border-gray-200 bg-white p-3"
+          : "rounded-md border border-transparent"
+      }
+    >
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs text-gray-500">
           {lineIndex === 0 ? "Material" : `Material #${lineIndex + 1}`}
@@ -318,7 +325,13 @@ export function RouteRow({
   const haulUnit = normalizeMaterialUnit(route.haulUnit);
   const haulGp = haulGpPercent(route.haulCost, route.haulRate, brokerFeePercent);
   const materialLines = getRouteMaterials(route);
-  const catalog = catalogMaterials(materials);
+  const quarryMaterials = route.pickupVendorId
+    ? materials.filter((m) => materialVendorIds(m).includes(route.pickupVendorId!))
+    : materials;
+  /** Prefer quarry-specific rows (no cross-quarry name collapse when filtered). */
+  const catalog = route.pickupVendorId
+    ? [...quarryMaterials].sort((a, b) => a.name.localeCompare(b.name))
+    : catalogMaterials(materials);
 
   const pickupVendor = pickupVendors.find((v) => v.id === route.pickupVendorId);
   const pickupLabel = pickupVendor?.name || route.pickupAddress.trim() || "No pickup set";
@@ -629,12 +642,17 @@ export function RouteRow({
                   line={line}
                   lineIndex={li}
                   catalog={catalog}
-                  canRemove={materialLines.length > 1}
+                  canRemove={materialLines.length > 0}
                   onChange={(patch) => updateLine(line.id, patch)}
                   onRemove={() => removeLine(line.id)}
                   onRequestNewMaterial={() => onRequestNewMaterial(line.id)}
                 />
               ))
+            )}
+            {route.pickupVendorId && catalog.length === 0 && (
+              <p className="mt-2 text-[10px] text-amber-700">
+                No materials at this quarry — add them on the vendor page, or use Custom.
+              </p>
             )}
             <div className="mt-2 flex items-center justify-between border-t border-gray-200 pt-2">
               <div className="flex items-center gap-2">

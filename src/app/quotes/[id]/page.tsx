@@ -11,6 +11,7 @@ import {
   XCircle,
   Pencil,
   Clock,
+  ShoppingCart,
 } from "lucide-react";
 import { useDb } from "@/components/DbProvider";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -25,7 +26,7 @@ import { duplicateQuote, appendQuoteHistory, parseSentRecipients } from "@/lib/q
 import { getRouteMaterials } from "@/lib/route-materials";
 import { ActivitiesPanel } from "@/components/activities/ActivitiesPanel";
 import { getActivitiesForQuote } from "@/lib/activities";
-import { Quote, QuoteHistoryEvent, normalizeMaterialUnit, unitRateLabel } from "@/lib/types";
+import { Quote, QuoteHistoryEvent, normalizeMaterialUnit, unitQtyLabel, unitRateLabel } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { QuotePdfButton } from "@/components/quotes/QuotePdfButton";
 import { QuoteSendSheet } from "@/components/quotes/QuoteSendSheet";
@@ -73,6 +74,7 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
   const { haulBrokerIncome, haulingGP, materialGP } = quoteCalc;
 
   const quoteActivities = getActivitiesForQuote(db, currentQuote);
+  const quoteOrders = db.orders.filter((o) => o.quoteId === currentQuote.id);
 
   const quoteHistory: QuoteHistoryEvent[] =
     currentQuote.history?.length
@@ -131,6 +133,15 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {quote.status === "approved" && (
+              <Button
+                size="sm"
+                className="bg-[#1e3a5f] hover:bg-[#172e4d] text-white gap-1.5"
+                onClick={() => router.push(`/quotes/${id}/create-order`)}
+              >
+                <ShoppingCart className="h-4 w-4" /> Create Order
+              </Button>
+            )}
             <Button
               size="sm"
               className="bg-[#0f6b4f] hover:bg-[#0d5c43] text-white gap-1.5"
@@ -239,9 +250,11 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
                   Hauling
                 </span>
                 Buy {formatCurrency(route.haulCost)} (net{" "}
-                {formatCurrency(netHaulBuyRate(route.haulCost, brokerFeePercent))}/ton) · Broker{" "}
-                {formatCurrency(haulBrokerIncomePerTon(route.haulCost, brokerFeePercent))}/ton · Sell{" "}
-                {formatCurrency(route.haulRate)} · {route.haulQty} ton
+                {formatCurrency(netHaulBuyRate(route.haulCost, brokerFeePercent))}{" "}
+                {unitRateLabel(route.haulUnit)}) · Broker{" "}
+                {formatCurrency(haulBrokerIncomePerTon(route.haulCost, brokerFeePercent))}{" "}
+                {unitRateLabel(route.haulUnit)} · Sell {formatCurrency(route.haulRate)} ·{" "}
+                {route.haulQty} {unitQtyLabel(route.haulUnit)}
               </div>
               {getRouteMaterials(route).map((line, mi) => {
                 const allIn = allInUnitRate(
@@ -331,6 +344,32 @@ export default function QuoteDetailPage({ params }: { params: Promise<{ id: stri
 
       <div className="w-[280px] shrink-0 border-l border-gray-200 bg-white p-6 overflow-y-auto">
         <h2 className="mb-4 text-base font-semibold text-gray-900">Summary</h2>
+
+        <div className="my-4 border-t border-gray-100" />
+
+        {quote.status === "approved" && (
+          <>
+            <div className="mb-4 space-y-1 text-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">
+                Orders
+              </p>
+              {quoteOrders.length === 0 ? (
+                <p className="text-gray-500">No orders yet from this quote.</p>
+              ) : (
+                quoteOrders.map((o) => (
+                  <Link
+                    key={o.id}
+                    href={`/orders/${o.id}`}
+                    className="block text-[#0f6b4f] hover:underline"
+                  >
+                    {o.number}
+                  </Link>
+                ))
+              )}
+            </div>
+            <div className="my-4 border-t border-gray-100" />
+          </>
+        )}
 
         <div className="space-y-2 text-sm">
           {quote.routes.map((route, i) => (

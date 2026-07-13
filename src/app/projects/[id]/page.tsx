@@ -85,9 +85,7 @@ function ProjectDetailPageContent({ params }: { params: Promise<{ id: string }> 
   const project = db.projects.find((p) => p.id === id);
   const quotes = db.quotes.filter((q) => q.projectId === id);
   const orders = ordersForProject(db, id);
-  const approvedQuotesWithoutOrder = quotes.filter(
-    (q) => q.status === "approved" && !orders.some((o) => o.quoteId === q.id)
-  );
+  const approvedQuotes = quotes.filter((q) => q.status === "approved");
 
   if (!project) {
     return (
@@ -320,11 +318,24 @@ function ProjectDetailPageContent({ params }: { params: Promise<{ id: string }> 
         <TabsContent value="orders">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-base font-semibold text-gray-900">Orders</h2>
-            <Link href="/orders">
-              <Button size="sm" variant="outline" className="gap-1">
-                Create from quote on Orders
-              </Button>
-            </Link>
+            {approvedQuotes.length > 0 && (
+              <div className="flex items-center gap-2">
+                <select
+                  className="h-9 rounded-md border border-gray-200 bg-white px-3 text-sm"
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) router.push(`/quotes/${e.target.value}/create-order`);
+                  }}
+                >
+                  <option value="">Create from quote…</option>
+                  {approvedQuotes.map((q) => (
+                    <option key={q.id} value={q.id}>
+                      {q.number} — {q.jobName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
@@ -342,9 +353,9 @@ function ProjectDetailPageContent({ params }: { params: Promise<{ id: string }> 
                 {orders.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-4 py-8 text-center text-gray-400">
-                      {approvedQuotesWithoutOrder.length > 0
-                        ? "Create orders from approved quotes on the Orders page."
-                        : "Approve a quote first, then create an order on the Orders page."}
+                      {approvedQuotes.length > 0
+                        ? "Create an order from an approved quote."
+                        : "Approve a quote first, then create an order."}
                     </td>
                   </tr>
                 )}

@@ -13,10 +13,15 @@ export function buildParsedIntake(
   const raw = parseMsgBuffer(buffer);
   const { signature, mainBody, isForwarded, originalSender } = extractCustomerFromBody(
     raw.bodyText,
-    { name: raw.senderName, email: raw.senderEmail }
+    { name: raw.senderName, email: raw.senderEmail },
+    { db }
   );
 
-  const project = extractProjectFromEmail(raw.subject, mainBody, fileName);
+  const attachmentNames = raw.attachments.map((a) => a.fileName);
+  const project = extractProjectFromEmail(raw.subject, mainBody, fileName, {
+    excludeAddresses: [signature.address].filter(Boolean),
+    attachmentNames,
+  });
 
   const parsed: ParsedEmailIntake = {
     subject: raw.subject,
@@ -27,7 +32,7 @@ export function buildParsedIntake(
     project,
     isForwarded,
     originalSender,
-    attachmentNames: raw.attachments.map((a) => a.fileName),
+    attachmentNames,
   };
 
   return { parsed, matches: buildMatchPreview(db, parsed) };

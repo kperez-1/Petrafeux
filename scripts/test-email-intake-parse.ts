@@ -1,40 +1,104 @@
-import { parseProjectFromFileName } from "../src/lib/email-intake/extract-project";
-import { buildMatchPreview } from "../src/lib/email-intake/match-contractor";
-import type { ParsedEmailIntake } from "../src/lib/email-intake/types";
+import {
+  cleanSubject,
+  extractAddressFromSubject,
+  extractProjectFromEmail,
+  parseProjectFromFileName,
+} from "../src/lib/email-intake/extract-project";
+import {
+  extractCustomerFromBody,
+  findOriginalExternalSender,
+} from "../src/lib/email-intake/extract-signature";
 import { EMPTY_DB } from "../src/lib/db-defaults";
 
+const internal = ["alliedtk.com", "petrafi.com"];
+
+// Forwarded internal → external customer
+const forwardBody = `From: Jane Customer <jane@oakwood.com>
+Sent: Monday, June 1, 2026
+Subject: Bid request
+
+Location: 123 Jobsite Rd, Boynton Beach, FL 33426
+
+Thanks,
+--
+John Internal
+user@alliedtk.com`;
+
+const customer = extractCustomerFromBody(forwardBody, {
+  name: "John Internal",
+  email: "user@alliedtk.com",
+});
+if (customer.originalSender?.email !== "jane@oakwood.com") {
+  console.error("FAIL: expected jane@oakwood.com as original sender");
+  process.exit(1);
+}
+if (customer.signature.email !== "jane@oakwood.com") {
+  console.error("FAIL: expected customer email on signature");
+  process.exit(1);
+}
+
+// Double forward chain
+const doubleForward = `From: Bob Builder <bob@builder.com>
+From: Internal User <user@alliedtk.com>
+Location: 500 Main St`;
+const ext = findOriginalExternalSender(doubleForward, internal);
+if (ext?.email !== "bob@builder.com") {
+  console.error("FAIL: double forward should find bob@builder.com");
+  process.exit(1);
+}
+
+// Signature address must not become jobsite
+const project = extractProjectFromEmail(
+  "RE: FW: Oakwood Square (Boynton Beach, FL)",
+  "Location: 123 Jobsite Rd, Boynton Beach, FL 33426",
+  undefined,
+  { excludeAddresses: ["999 HQ Blvd, Miami, FL"] }
+);
+if (!project.address.includes("Jobsite")) {
+  console.error("FAIL: expected jobsite address from body");
+  process.exit(1);
+}
+if (project.name !== "Oakwood Square (Boynton Beach, FL)") {
+  console.error("FAIL: expected cleaned subject as project name, got", project.name);
+  process.exit(1);
+}
+
+// Subject-only fallback
+const subjectOnly = extractProjectFromEmail(
+  "RE: FW: Oakwood Square Retail",
+  "",
+  undefined,
+  { excludeAddresses: ["999 HQ Blvd"] }
+);
+if (subjectOnly.name !== "Oakwood Square Retail") {
+  console.error("FAIL: subject fallback name");
+  process.exit(1);
+}
+
+// Filename parse
 const fileName =
   "EXTERNAL_ Oakwood Square Retail (Boynton Beach_ FL) _ Due_ Jun 12_ 2026 _.msg";
-
 const fromFile = parseProjectFromFileName(fileName);
-console.log("Filename parse:", fromFile);
-
-const parsed: ParsedEmailIntake = {
-  subject: "Invitation to Bid - Oakwood Square Retail",
-  from: { name: "Internal", email: "user@alliedtk.com" },
-  bodyText: "Location: 123 Main St, Boynton Beach, FL 33426",
-  signature: {
-    name: "Jane Doe",
-    email: "jane@oakwood.com",
-    phone: "561-555-0100",
-    company: "Oakwood Development",
-    address: "999 HQ Blvd, Miami, FL",
-  },
-  project: {
-    name: fromFile.name ?? "",
-    address: "",
-    dueDate: fromFile.dueDate,
-  },
-  isForwarded: true,
-  attachmentNames: ["plans.pdf"],
-};
-
-const matches = buildMatchPreview(EMPTY_DB, parsed);
-console.log("Match preview (empty db):", matches);
-
-if (fromFile.name?.includes("Oakwood") && fromFile.dueDate?.includes("Jun")) {
-  console.log("OK: Oakwood filename pattern");
-  process.exit(0);
+if (!fromFile.name?.includes("Oakwood") || !fromFile.dueDate?.includes("Jun")) {
+  console.error("FAIL: filename parse");
+  process.exit(1);
 }
-console.error("FAIL: expected Oakwood + due date from filename");
-process.exit(1);
+
+// cleanSubject loops
+if (cleanSubject("RE: FW: Test Project") !== "Test Project") {
+  console.error("FAIL: cleanSubject");
+  process.exit(1);
+}
+
+// Attachment hint
+const withAttach = extractProjectFromEmail("Bid", "", undefined, {
+  attachmentNames: ["Plans - Oakwood (Boynton Beach, FL).pdf"],
+  excludeAddresses: [],
+});
+if (!withAttach.addressHint?.includes("Boynton")) {
+  console.error("FAIL: attachment address hint");
+  process.exit(1);
+}
+
+console.log("OK: all email intake parse fixtures passed");
+process.exit(0);

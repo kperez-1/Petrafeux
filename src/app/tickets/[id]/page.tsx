@@ -16,6 +16,7 @@ import {
   saveTicket,
 } from "@/lib/billing-on-approve";
 import { resolveCurrentUser } from "@/lib/current-user";
+import { deliveryTicketLineLabel } from "@/lib/delivery-ticket-billing";
 import { DetailBreadcrumb, DetailHeader } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -169,7 +170,7 @@ export default function TicketReviewPage({ params }: { params: Promise<{ id: str
             <dl className="mb-4 space-y-2 text-gray-600">
               <div className="flex justify-between gap-2">
                 <dt>Type</dt>
-                <dd className="capitalize">{ticket.lineType}</dd>
+                <dd>{deliveryTicketLineLabel(ticket.lineType)}</dd>
               </div>
               <div className="flex justify-between gap-2">
                 <dt>Delivered</dt>

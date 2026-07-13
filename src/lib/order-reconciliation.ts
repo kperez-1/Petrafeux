@@ -2,6 +2,12 @@ import { Db, OrderLine } from "./types";
 import { getOrder } from "./orders";
 import { approvedTicketsForOrder } from "./delivery-tickets";
 import { buildInvoiceLine } from "./billing-ar";
+import {
+  actsAsHaulTicket,
+  billingTicketVariants,
+  shouldBillMaterialOnDelivery,
+} from "./delivery-ticket-billing";
+import { resolveMaterialBuyRate, resolveMaterialSellRate } from "./route-materials";
 import { getBrokerFeePercent } from "./db-defaults";
 import { netHaulBuyRate } from "./margin-calc";
 
@@ -43,22 +49,28 @@ function buildRouteRow(
     (t) => t.orderLineId === line.id
   );
   const deliveredHaulQty = approved
-    .filter((t) => t.lineType === "haul")
+    .filter((t) => actsAsHaulTicket(t))
     .reduce((s, t) => s + t.qty, 0);
-  const deliveredMatQty = approved
-    .filter((t) => t.lineType === "material" || t.lineType === "disposal")
-    .reduce((s, t) => s + t.qty, 0);
+  const deliveredMatQty =
+    approved
+      .filter((t) => t.lineType === "material" || t.lineType === "disposal")
+      .reduce((s, t) => s + t.qty, 0) +
+    approved
+      .filter((t) => t.lineType === "delivery" && shouldBillMaterialOnDelivery(line))
+      .reduce((s, t) => s + t.qty, 0);
   const quotedQty = line.haulQtyQuoted + line.materialQtyQuoted;
   const deliveredQty = deliveredHaulQty + deliveredMatQty;
 
+  const materialSell = resolveMaterialSellRate(line);
+  const materialBuy = resolveMaterialBuyRate(line);
   const haulRev = Math.round(line.haulSellRate * deliveredHaulQty * 100) / 100;
   const matRev =
-    Math.round(line.materialSellRate * deliveredMatQty * 100) / 100 +
+    Math.round(materialSell * deliveredMatQty * 100) / 100 +
     Math.round((line.disposalSellRate ?? 0) * deliveredMatQty * 100) / 100;
 
   const haulBuy = Math.round(line.haulBuyRate * deliveredHaulQty * 100) / 100;
   const matBuy =
-    Math.round(line.materialBuyRate * deliveredMatQty * 100) / 100 +
+    Math.round(materialBuy * deliveredMatQty * 100) / 100 +
     Math.round((line.disposalBuyRate ?? 0) * deliveredMatQty * 100) / 100;
   const haulNetBuy =
     Math.round(netHaulBuyRate(line.haulBuyRate, brokerFeePercent) * deliveredHaulQty * 100) /
@@ -103,22 +115,36 @@ export function buildOrderReconciliation(db: Db, orderId: string): Reconciliatio
   const quotedHaulQty = order.lines.reduce((s, l) => s + l.haulQtyQuoted, 0);
   const quotedMaterialQty = order.lines.reduce((s, l) => s + l.materialQtyQuoted, 0);
   const quotedArTotal = order.lines.reduce(
-    (s, l) => s + l.haulSellRate * l.haulQtyQuoted + l.materialSellRate * l.materialQtyQuoted,
+    (s, l) =>
+      s +
+      l.haulSellRate * l.haulQtyQuoted +
+      resolveMaterialSellRate(l) * l.materialQtyQuoted,
     0
   );
 
   const approved = approvedTicketsForOrder(db, orderId);
   const deliveredHaulQty = approved
-    .filter((t) => t.lineType === "haul")
+    .filter((t) => actsAsHaulTicket(t))
     .reduce((s, t) => s + t.qty, 0);
-  const deliveredMaterialQty = approved
-    .filter((t) => t.lineType === "material")
-    .reduce((s, t) => s + t.qty, 0);
+  const deliveredMaterialQty =
+    approved
+      .filter((t) => t.lineType === "material" || t.lineType === "disposal")
+      .reduce((s, t) => s + t.qty, 0) +
+    order.lines.reduce((sum, line) => {
+      const qty = approved
+        .filter((t) => t.orderLineId === line.id && t.lineType === "delivery")
+        .reduce((s, t) => s + t.qty, 0);
+      return shouldBillMaterialOnDelivery(line) ? sum + qty : sum;
+    }, 0);
 
   let deliveredArTotal = 0;
   for (const ticket of approved) {
-    const line = buildInvoiceLine(db, ticket);
-    if (line) deliveredArTotal += line.amount;
+    const orderLine = order.lines.find((l) => l.id === ticket.orderLineId);
+    const variants = orderLine ? billingTicketVariants(ticket, orderLine) : [ticket];
+    for (const variant of variants) {
+      const line = buildInvoiceLine(db, variant);
+      if (line) deliveredArTotal += line.amount;
+    }
   }
 
   const invoicedArTotal = db.customerInvoices
